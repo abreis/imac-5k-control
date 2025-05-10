@@ -1,11 +1,11 @@
 #![no_std]
 #![no_main]
 // #![allow(unused_imports)]
-#![allow(unused_variables)]
+// #![allow(unused_variables)]
 // #![allow(unreachable_code)]
 // #![allow(unused_must_use)]
 // #![allow(unused_mut)]
-#![allow(dead_code)]
+// #![allow(dead_code)]
 
 extern crate alloc;
 
@@ -20,8 +20,6 @@ use esp_hal::clock::CpuClock;
 use esp_hal::gpio;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_println::println;
-use static_cell::StaticCell;
-use task::pin_control::PinControlChannel;
 
 // NOTES
 // - esp_println sends prints to 'jtag-serial' via the USB port (set in Cargo.toml)
@@ -41,8 +39,8 @@ async fn main(spawner: Spawner) {
     // Onboard LED on the M5Stamp C3U.
     let _pin_led_onboard = peripherals.GPIO2;
     // UART pins.
-    let _pin_uart_tx = peripherals.GPIO20;
-    let _pin_uart_rx = peripherals.GPIO21;
+    let pin_uart_rx = peripherals.GPIO20;
+    let pin_uart_tx = peripherals.GPIO21;
     // G5 triggers the controller power button on level:high (via nMOS).
     let pin_button_power = gpio::Output::new(peripherals.GPIO5, gpio::Level::Low, output_5ma);
     // G6, G7, G8, G10 trigger controller buttons on level:low (via SPST switches).
@@ -70,7 +68,7 @@ async fn main(spawner: Spawner) {
     let pin_power_fan = gpio::Output::new(peripherals.GPIO1, gpio::Level::Low, output_5ma);
     // G18 reads the tachometer in the case fan.
     // TODO: fan tachy on USB pins?
-    let pin_fan_tachy = gpio::Input::new(peripherals.GPIO18, gpio::InputConfig::default());
+    let _pin_fan_tachy = gpio::Input::new(peripherals.GPIO18, gpio::InputConfig::default());
     // G19 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
     let pin_fan_pwm = gpio::Output::new(peripherals.GPIO19, gpio::Level::High, output_5ma);
 
@@ -82,18 +80,13 @@ async fn main(spawner: Spawner) {
     // let mut rng = rng::Rng::new(peripherals.RNG);
     println!("imac5k display controller initialized");
 
-    //
-    // Channel setup.
-    //
-    // A channel to send pin control messages.
-    static PINCONTROL_CHANNEL: StaticCell<PinControlChannel> = StaticCell::new();
-    let pincontrol_channel = PINCONTROL_CHANNEL.init_with(|| PinControlChannel::new());
+    // Init the fan duty PWM controller.
+    let pwm_channel = task::fan_duty::init(peripherals.LEDC, pin_fan_pwm);
 
     //
     // Spawn tasks.
     || -> Result<(), SpawnError> {
         spawner.spawn(task::pin_control(
-            pincontrol_channel.receiver(),
             pin_button_power,
             pin_button_menu,
             pin_button_enter,
@@ -102,6 +95,14 @@ async fn main(spawner: Spawner) {
             pin_power_display,
             pin_power_fan,
         ))?;
+
+        spawner.spawn(task::serial_console(
+            peripherals.UART0.into(),
+            pin_uart_rx.into(),
+            pin_uart_tx.into(),
+        ))?;
+
+        spawner.spawn(task::fan_duty(pwm_channel))?;
 
         Ok(())
     }()
