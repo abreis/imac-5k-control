@@ -49,10 +49,7 @@ async fn main(spawner: Spawner) {
     let pin_button_down = gpio::Output::new(peripherals.GPIO8, gpio::Level::High, output_5ma);
     let pin_button_up = gpio::Output::new(peripherals.GPIO10, gpio::Level::High, output_5ma);
     // G4 reads the case button, which pulls the line to GND when pressed.
-    let pin_button_case = gpio::Input::new(
-        peripherals.GPIO4,
-        gpio::InputConfig::default().with_pull(gpio::Pull::Up),
-    );
+    let pin_button_case = peripherals.GPIO4;
     // G0 commands the DS18B20 temperature sensor, which is phantom-powered.
     let pin_sensor_temp = gpio::Output::new(
         peripherals.GPIO0,
@@ -103,6 +100,8 @@ async fn main(spawner: Spawner) {
         ))?;
 
         spawner.spawn(task::fan_duty(pwm_channel))?;
+
+        spawner.spawn(task::case_button(pin_button_case.into()))?;
 
         Ok(())
     }()
