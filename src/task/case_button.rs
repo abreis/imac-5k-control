@@ -1,5 +1,8 @@
 use super::pin_control::PINCONTROL_CHANNEL;
-use crate::types::{ControlMessage, OnOff};
+use crate::{
+    memlog,
+    types::{ControlMessage, OnOff},
+};
 use embassy_time::Duration;
 use esp_hal::gpio;
 
@@ -25,6 +28,11 @@ pub async fn case_button(pin: gpio::AnyPin) {
             let held_duration = fall_time.elapsed();
             if held_duration > BUTTON_HELD_DURATION_MIN {
                 // TODO: action depends on our state, which we don't track yet.
+                memlog::debug(alloc::format!(
+                    "case button triggered: {}ms",
+                    held_duration.as_millis()
+                ))
+                .await;
                 // PINCONTROL_CHANNEL
                 //     .send(ControlMessage::DisplayPower(OnOff::On))
                 //     .await;

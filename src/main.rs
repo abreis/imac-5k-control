@@ -1,20 +1,20 @@
 #![no_std]
 #![no_main]
-// #![allow(unused_imports)]
+#![allow(unused_imports)]
+#![allow(dead_code)]
 // #![allow(unused_variables)]
 // #![allow(unreachable_code)]
 // #![allow(unused_must_use)]
 // #![allow(unused_mut)]
-// #![allow(dead_code)]
 
 extern crate alloc;
 
+mod memlog;
 mod task;
 mod types;
 
 use core::result::Result;
 use embassy_executor::{SpawnError, Spawner};
-use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio;
@@ -23,9 +23,11 @@ use esp_println::println;
 
 // NOTES
 // - esp_println sends prints to 'jtag-serial' via the USB port (set in Cargo.toml)
+// - TODO: we can probably run at a lower clock speed (runs less hot)
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
+    // let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
     let peripherals = esp_hal::init(esp_config);
 
@@ -51,7 +53,7 @@ async fn main(spawner: Spawner) {
     // G4 reads the case button, which pulls the line to GND when pressed.
     let pin_button_case = peripherals.GPIO4;
     // G0 commands the DS18B20 temperature sensor, which is phantom-powered.
-    let pin_sensor_temp = gpio::Output::new(
+    let _pin_sensor_temp = gpio::Output::new(
         peripherals.GPIO0,
         gpio::Level::High,
         gpio::OutputConfig::default()
@@ -63,11 +65,11 @@ async fn main(spawner: Spawner) {
     let pin_power_display = gpio::Output::new(peripherals.GPIO3, gpio::Level::Low, output_5ma);
     // G1 goes to the nMOS gate that switches 12VDC power on to the case fan.
     let pin_power_fan = gpio::Output::new(peripherals.GPIO1, gpio::Level::Low, output_5ma);
-    // G18 reads the tachometer in the case fan.
-    // TODO: fan tachy on USB pins?
-    let _pin_fan_tachy = gpio::Input::new(peripherals.GPIO18, gpio::InputConfig::default());
-    // G19 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
-    let pin_fan_pwm = gpio::Output::new(peripherals.GPIO19, gpio::Level::High, output_5ma);
+    // TODO: fan control is on USB pins? requires a pin09 held low + reset to be able to flash again
+    // // G18 reads the tachometer in the case fan.
+    // let _pin_fan_tachy = gpio::Input::new(peripherals.GPIO18, gpio::InputConfig::default());
+    // // G19 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
+    // let _pin_fan_pwm = gpio::Output::new(peripherals.GPIO19, gpio::Level::High, output_5ma);
 
     //
     // Resume initialization.
@@ -77,8 +79,9 @@ async fn main(spawner: Spawner) {
     // let mut rng = rng::Rng::new(peripherals.RNG);
     println!("imac5k display controller initialized");
 
-    // Init the fan duty PWM controller.
-    let pwm_channel = task::fan_duty::init(peripherals.LEDC, pin_fan_pwm);
+    // Initialize an in-memory logger with space for 480 characters.
+    memlog::init(480).await;
+    memlog::info("imac5k display controller initialized").await;
 
     //
     // Spawn tasks.
@@ -92,22 +95,18 @@ async fn main(spawner: Spawner) {
             pin_power_display,
             pin_power_fan,
         ))?;
-
         spawner.spawn(task::serial_console(
             peripherals.UART0.into(),
             pin_uart_rx.into(),
             pin_uart_tx.into(),
         ))?;
-
-        spawner.spawn(task::fan_duty(pwm_channel))?;
-
         spawner.spawn(task::case_button(pin_button_case.into()))?;
+
+        // Init the fan duty PWM controller.
+        // let pwm_channel = task::fan_duty::init(peripherals.LEDC, pin_fan_pwm);
+        // spawner.spawn(task::fan_duty(pwm_channel))?;
 
         Ok(())
     }()
     .unwrap();
-
-    loop {
-        Timer::after(Duration::from_secs(60)).await;
-    }
 }
