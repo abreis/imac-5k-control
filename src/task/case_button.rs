@@ -1,7 +1,7 @@
 use super::pin_control::PINCONTROL_CHANNEL;
 use crate::{
-    memlog,
-    types::{ControlMessage, OnOff},
+    memlog, power,
+    state::{self, State},
 };
 use embassy_time::Duration;
 use esp_hal::gpio;
@@ -24,18 +24,17 @@ pub async fn case_button(pin: gpio::AnyPin) {
 
         let wait_for_high = case_pin.wait_for_high();
         let _ = embassy_time::with_timeout(BUTTON_HELD_DURATION_MAX, wait_for_high).await;
-        {
-            let held_duration = fall_time.elapsed();
-            if held_duration > BUTTON_HELD_DURATION_MIN {
-                // TODO: action depends on our state, which we don't track yet.
-                memlog::debug(alloc::format!(
-                    "case button triggered: {}ms",
-                    held_duration.as_millis()
-                ))
-                .await;
-                // PINCONTROL_CHANNEL
-                //     .send(ControlMessage::DisplayPower(OnOff::On))
-                //     .await;
+
+        let held_duration = fall_time.elapsed();
+        if held_duration > BUTTON_HELD_DURATION_MIN {
+            memlog::debug("case button triggered").await;
+
+            match state::get().await {
+                State::Standby => power::power_on().await.unwrap(),
+                State::DisplayOn => power::power_off().await.unwrap(),
+                _invalid_state => {
+                    memlog::warn("case button pressed while in invalid state, ignored").await
+                }
             }
         }
     }

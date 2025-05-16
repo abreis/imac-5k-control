@@ -1,7 +1,9 @@
 use crate::{
     memlog,
-    task::{fan_duty::FANDUTY_SIGNAL, pin_control::PINCONTROL_CHANNEL},
-    types::{ControlMessage, OnOff},
+    task::{
+        fan_duty::FANDUTY_SIGNAL,
+        pin_control::{OnOff, PINCONTROL_CHANNEL, PinControlMessage},
+    },
 };
 use alloc::{format, string::String};
 use embassy_time::{Duration, Timer};
@@ -109,23 +111,27 @@ async fn cli_parser(
         // Trigger display controller buttons.
         Some("button") => match chunks.next() {
             Some("power") => {
-                PINCONTROL_CHANNEL.send(ControlMessage::ButtonPower).await;
+                PINCONTROL_CHANNEL
+                    .send(PinControlMessage::ButtonPower)
+                    .await;
                 "Triggered button 'power'"
             }
             Some("menu") => {
-                PINCONTROL_CHANNEL.send(ControlMessage::ButtonMenu).await;
+                PINCONTROL_CHANNEL.send(PinControlMessage::ButtonMenu).await;
                 "Triggered button 'menu'"
             }
             Some("enter") => {
-                PINCONTROL_CHANNEL.send(ControlMessage::ButtonEnter).await;
+                PINCONTROL_CHANNEL
+                    .send(PinControlMessage::ButtonEnter)
+                    .await;
                 "Triggered button 'enter'"
             }
             Some("down") => {
-                PINCONTROL_CHANNEL.send(ControlMessage::ButtonDown).await;
+                PINCONTROL_CHANNEL.send(PinControlMessage::ButtonDown).await;
                 "Triggered button 'down'"
             }
             Some("up") => {
-                PINCONTROL_CHANNEL.send(ControlMessage::ButtonUp).await;
+                PINCONTROL_CHANNEL.send(PinControlMessage::ButtonUp).await;
                 "Triggered button 'up'"
             }
             None => "Subcommand required for 'button'",
@@ -137,13 +143,13 @@ async fn cli_parser(
             Some("display") => match chunks.next() {
                 Some("on") => {
                     PINCONTROL_CHANNEL
-                        .send(ControlMessage::DisplayPower(On))
+                        .send(PinControlMessage::DisplayPower(On))
                         .await;
                     "Display power turned on"
                 }
                 Some("off") => {
                     PINCONTROL_CHANNEL
-                        .send(ControlMessage::DisplayPower(Off))
+                        .send(PinControlMessage::DisplayPower(Off))
                         .await;
                     "Display power turned off"
                 }
@@ -152,11 +158,15 @@ async fn cli_parser(
             },
             Some("fan") => match chunks.next() {
                 Some("on") => {
-                    PINCONTROL_CHANNEL.send(ControlMessage::FanPower(On)).await;
+                    PINCONTROL_CHANNEL
+                        .send(PinControlMessage::FanPower(On))
+                        .await;
                     "Fan power turned on"
                 }
                 Some("off") => {
-                    PINCONTROL_CHANNEL.send(ControlMessage::FanPower(Off)).await;
+                    PINCONTROL_CHANNEL
+                        .send(PinControlMessage::FanPower(Off))
+                        .await;
                     "Fan power turned off"
                 }
                 None => "Subcommand required for 'power fan'",

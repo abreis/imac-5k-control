@@ -10,8 +10,9 @@
 extern crate alloc;
 
 mod memlog;
+mod power;
+mod state;
 mod task;
-mod types;
 
 use core::result::Result;
 use embassy_executor::{SpawnError, Spawner};
