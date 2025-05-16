@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
-#![allow(unused_imports)]
-#![allow(dead_code)]
+// #![allow(unused_imports)]
+// #![allow(dead_code)]
 // #![allow(unused_variables)]
 // #![allow(unreachable_code)]
 // #![allow(unused_must_use)]
@@ -24,7 +24,9 @@ use esp_println::println;
 
 // NOTES
 // - esp_println sends prints to 'jtag-serial' via the USB port (set in Cargo.toml)
-// - TODO: we can probably run at a lower clock speed (runs less hot)
+//
+// TODO
+// - we can probably run at a lower clock speed (runs less hot)
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -69,20 +71,28 @@ async fn main(spawner: Spawner) {
     // TODO: fan control is on USB pins? requires a pin09 held low + reset to be able to flash again
     // // G18 reads the tachometer in the case fan.
     // let _pin_fan_tachy = gpio::Input::new(peripherals.GPIO18, gpio::InputConfig::default());
-    // // G19 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
-    // let _pin_fan_pwm = gpio::Output::new(peripherals.GPIO19, gpio::Level::High, output_5ma);
+    // G19 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
+    let pin_fan_pwm = gpio::Output::new(peripherals.GPIO19, gpio::Level::High, output_5ma);
 
     //
     // Resume initialization.
     esp_alloc::heap_allocator!(size: 72 * 1024);
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
     esp_hal_embassy::init(timer0.alarm0);
-    // let mut rng = rng::Rng::new(peripherals.RNG);
     println!("imac5k display controller initialized");
 
     // Initialize an in-memory logger with space for 480 characters.
-    memlog::init(480).await;
-    memlog::info("imac5k display controller initialized").await;
+    let memlog = memlog::init(480);
+    memlog.info("imac5k display controller initialized");
+
+    // A shared state for the display.
+    let state = state::SharedState::new_standby();
+
+    // Init the fan duty PWM controller.
+    let (pwm_channel, fanduty_signal) = task::fan_duty::init(peripherals.LEDC, pin_fan_pwm);
+
+    // Get a shareable channel to send messages to the pincontrol task.
+    let pincontrol_channel = task::pin_control::init();
 
     //
     // Spawn tasks.
@@ -95,17 +105,24 @@ async fn main(spawner: Spawner) {
             pin_button_up,
             pin_power_display,
             pin_power_fan,
+            pincontrol_channel,
         ))?;
         spawner.spawn(task::serial_console(
             peripherals.UART0.into(),
             pin_uart_rx.into(),
             pin_uart_tx.into(),
+            pincontrol_channel,
+            fanduty_signal,
+            memlog,
         ))?;
-        spawner.spawn(task::case_button(pin_button_case.into()))?;
+        spawner.spawn(task::case_button(
+            state,
+            pin_button_case.into(),
+            pincontrol_channel,
+            memlog,
+        ))?;
 
-        // Init the fan duty PWM controller.
-        // let pwm_channel = task::fan_duty::init(peripherals.LEDC, pin_fan_pwm);
-        // spawner.spawn(task::fan_duty(pwm_channel))?;
+        spawner.spawn(task::fan_duty(pwm_channel, fanduty_signal))?;
 
         Ok(())
     }()

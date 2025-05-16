@@ -1,12 +1,16 @@
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel};
+use alloc::boxed::Box;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel};
 use embassy_time::{Duration, Timer};
 use esp_hal::gpio;
+
+use crate::memlog::SharedLogger;
 
 // How long to toggle button control pins for.
 const BUTTON_DELAY_MS: Duration = Duration::from_millis(100);
 
-pub static PINCONTROL_CHANNEL: channel::Channel<CriticalSectionRawMutex, PinControlMessage, 5> =
-    channel::Channel::new();
+const CHANNEL_BACKLOG: usize = 5;
+pub type PinControlChannel =
+    &'static channel::Channel<NoopRawMutex, PinControlMessage, CHANNEL_BACKLOG>;
 
 #[derive(Copy, Clone)]
 pub enum OnOff {
@@ -25,6 +29,10 @@ pub enum PinControlMessage {
     FanPower(OnOff),
 }
 
+pub fn init() -> PinControlChannel {
+    Box::leak(Box::new(channel::Channel::new()))
+}
+
 /// Triggers actions controlled by output pins.
 #[embassy_executor::task]
 pub async fn pin_control(
@@ -35,11 +43,12 @@ pub async fn pin_control(
     mut pin_button_up: gpio::Output<'static>,
     mut pin_power_display: gpio::Output<'static>,
     mut pin_power_fan: gpio::Output<'static>,
+    pincontrol_channel: PinControlChannel,
 ) {
     loop {
         use OnOff::*;
         use PinControlMessage::*;
-        match PINCONTROL_CHANNEL.receive().await {
+        match pincontrol_channel.receive().await {
             // Power button is active high.
             ButtonPower => {
                 pin_button_power.set_high();

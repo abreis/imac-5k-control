@@ -1,9 +1,7 @@
+use super::{fan_duty::FanDutySignal, pin_control::PinControlChannel};
 use crate::{
-    memlog,
-    task::{
-        fan_duty::FANDUTY_SIGNAL,
-        pin_control::{OnOff, PINCONTROL_CHANNEL, PinControlMessage},
-    },
+    memlog::{self, SharedLogger},
+    task::pin_control::{OnOff, PinControlMessage},
 };
 use alloc::{format, string::String};
 use embassy_time::{Duration, Timer};
@@ -37,6 +35,9 @@ pub async fn serial_console(
     peripheral_uart: uart::AnyUart,
     pin_uart_rx: gpio::AnyPin,
     pin_uart_tx: gpio::AnyPin,
+    pincontrol_channel: PinControlChannel,
+    fanduty_signal: FanDutySignal,
+    memlog: SharedLogger,
 ) {
     // UART setup. When in loopback mode, ensure TX is configured first (#2914).
     let mut uart = uart::Uart::new(peripheral_uart, uart::Config::default())
@@ -64,7 +65,7 @@ pub async fn serial_console(
             let prompt = "> ";
             // Note: Ctrl-C and Ctrl-D break the readline while loop.
             while let Ok(line) = editor.readline(prompt, &mut uart).await {
-                cli_parser(line, &mut uart).await?;
+                cli_parser(line, &mut uart, pincontrol_channel, fanduty_signal, memlog).await?;
             }
 
             Ok(())
@@ -73,7 +74,7 @@ pub async fn serial_console(
 
         if let Err(tx_error) = catch {
             // Push the UART error to the memlog.
-            memlog::warn(format!("uart error: {}", tx_error)).await;
+            memlog.warn(format!("uart error: {}", tx_error));
         }
 
         // Pause before trying the UART again after an error.
@@ -84,6 +85,9 @@ pub async fn serial_console(
 async fn cli_parser(
     line: &str,
     uart: &mut uart::Uart<'static, Async>,
+    pincontrol_channel: PinControlChannel,
+    fanduty_signal: FanDutySignal,
+    memlog: SharedLogger,
 ) -> Result<(), uart::TxError> {
     use OnOff::*;
 
@@ -111,27 +115,27 @@ async fn cli_parser(
         // Trigger display controller buttons.
         Some("button") => match chunks.next() {
             Some("power") => {
-                PINCONTROL_CHANNEL
+                pincontrol_channel
                     .send(PinControlMessage::ButtonPower)
                     .await;
                 "Triggered button 'power'"
             }
             Some("menu") => {
-                PINCONTROL_CHANNEL.send(PinControlMessage::ButtonMenu).await;
+                pincontrol_channel.send(PinControlMessage::ButtonMenu).await;
                 "Triggered button 'menu'"
             }
             Some("enter") => {
-                PINCONTROL_CHANNEL
+                pincontrol_channel
                     .send(PinControlMessage::ButtonEnter)
                     .await;
                 "Triggered button 'enter'"
             }
             Some("down") => {
-                PINCONTROL_CHANNEL.send(PinControlMessage::ButtonDown).await;
+                pincontrol_channel.send(PinControlMessage::ButtonDown).await;
                 "Triggered button 'down'"
             }
             Some("up") => {
-                PINCONTROL_CHANNEL.send(PinControlMessage::ButtonUp).await;
+                pincontrol_channel.send(PinControlMessage::ButtonUp).await;
                 "Triggered button 'up'"
             }
             None => "Subcommand required for 'button'",
@@ -142,13 +146,13 @@ async fn cli_parser(
         Some("power") => match chunks.next() {
             Some("display") => match chunks.next() {
                 Some("on") => {
-                    PINCONTROL_CHANNEL
+                    pincontrol_channel
                         .send(PinControlMessage::DisplayPower(On))
                         .await;
                     "Display power turned on"
                 }
                 Some("off") => {
-                    PINCONTROL_CHANNEL
+                    pincontrol_channel
                         .send(PinControlMessage::DisplayPower(Off))
                         .await;
                     "Display power turned off"
@@ -158,13 +162,13 @@ async fn cli_parser(
             },
             Some("fan") => match chunks.next() {
                 Some("on") => {
-                    PINCONTROL_CHANNEL
+                    pincontrol_channel
                         .send(PinControlMessage::FanPower(On))
                         .await;
                     "Fan power turned on"
                 }
                 Some("off") => {
-                    PINCONTROL_CHANNEL
+                    pincontrol_channel
                         .send(PinControlMessage::FanPower(Off))
                         .await;
                     "Fan power turned off"
@@ -182,7 +186,7 @@ async fn cli_parser(
                 Some(pwm_value) => match pwm_value.parse::<u8>() {
                     Ok(value) => {
                         if (0..=100).contains(&value) {
-                            FANDUTY_SIGNAL.signal(value);
+                            fanduty_signal.signal(value);
                             "Fan duty set"
                         } else {
                             "Fan duty value must be between 0 and 100"
@@ -201,7 +205,7 @@ async fn cli_parser(
         Some("log") => match chunks.next() {
             Some("read") => {
                 // Note: this locks the entire memlog while it is being printed.
-                for record in memlog::records().await.iter().rev() {
+                for record in memlog.records().iter().rev() {
                     let timestamp = format_milliseconds_to_hms(record.instant.as_millis());
                     let formatted =
                         format!("[{}] {}: {}\r\n", timestamp, record.level, record.text);
@@ -210,7 +214,7 @@ async fn cli_parser(
                 ""
             }
             Some("clear") => {
-                memlog::clear().await;
+                memlog.clear();
                 "Logs cleared"
             }
             None => "Subcommand required for 'log'",

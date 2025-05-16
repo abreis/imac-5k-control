@@ -39,7 +39,6 @@ esp-println = { version = "0.13.0", default-features = false, features = [
     "jtag-serial",
 ] }
 noline = { version = "0.5.1", features = ["alloc"] }
-static_cell = "2.1.0"
 
 [profile.dev]
 opt-level = "s"

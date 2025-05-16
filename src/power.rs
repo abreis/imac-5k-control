@@ -1,7 +1,7 @@
 use crate::{
-    memlog,
-    state::{self, State},
-    task::pin_control::{OnOff, PINCONTROL_CHANNEL, PinControlMessage},
+    memlog::SharedLogger,
+    state::{SharedState, State},
+    task::pin_control::{OnOff, PinControlChannel, PinControlMessage},
 };
 use anyhow::bail;
 use embassy_time::{Duration, Timer};
@@ -11,47 +11,55 @@ const POWER_ON_PAUSE: Duration = Duration::from_millis(2500);
 // TODO: how long to wait after clicking power button?
 const BUTTON_OFF_PAUSE: Duration = Duration::from_millis(2500);
 
-pub async fn power_on() -> anyhow::Result<()> {
-    memlog::info("powering display on").await;
+pub async fn power_on(
+    state: SharedState,
+    pincontrol_channel: PinControlChannel,
+    memlog: SharedLogger,
+) -> anyhow::Result<()> {
+    memlog.info("powering display on");
 
     {
-        let current_state = state::get().await;
+        let current_state = state.get();
         if current_state != State::Standby {
             bail!("asked to power on while in state {current_state:?}")
         }
     }
 
-    state::to_powering_on().await?;
-    PINCONTROL_CHANNEL
+    state.to_powering_on()?;
+    pincontrol_channel
         .send(PinControlMessage::DisplayPower(OnOff::On))
         .await;
     Timer::after(POWER_ON_PAUSE).await;
 
-    state::to_display_on().await?;
-    PINCONTROL_CHANNEL
+    state.to_display_on()?;
+    pincontrol_channel
         .send(PinControlMessage::ButtonPower)
         .await;
 
     Ok(())
 }
-pub async fn power_off() -> anyhow::Result<()> {
-    memlog::info("powering display off").await;
+pub async fn power_off(
+    state: SharedState,
+    pincontrol_channel: PinControlChannel,
+    memlog: SharedLogger,
+) -> anyhow::Result<()> {
+    memlog.info("powering display off");
 
     {
-        let current_state = state::get().await;
+        let current_state = state.get();
         if current_state != State::DisplayOn {
             bail!("asked to power off while in state {current_state:?}")
         }
     }
 
-    state::to_powering_off().await?;
-    PINCONTROL_CHANNEL
+    state.to_powering_off()?;
+    pincontrol_channel
         .send(PinControlMessage::ButtonPower)
         .await;
     Timer::after(BUTTON_OFF_PAUSE).await;
 
-    state::to_standby().await?;
-    PINCONTROL_CHANNEL
+    state.to_standby()?;
+    pincontrol_channel
         .send(PinControlMessage::DisplayPower(OnOff::Off))
         .await;
 

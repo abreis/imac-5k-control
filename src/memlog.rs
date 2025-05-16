@@ -1,20 +1,28 @@
 //! An in-memory log storage, with a fixed size for records.
 #![allow(dead_code)]
 
-use core::fmt::Display;
-
-use alloc::{
-    collections::vec_deque::{self, VecDeque},
-    string::String,
-};
-use embassy_sync::{
-    blocking_mutex::raw::CriticalSectionRawMutex,
-    mutex::{MappedMutexGuard, Mutex, MutexGuard},
-};
+use alloc::{boxed::Box, collections::vec_deque::VecDeque, string::String};
+use core::{cell::RefCell, fmt::Display};
 use embassy_time::Instant;
 
-static GLOBAL_LOGGER: Mutex<CriticalSectionRawMutex, LogStorage> =
-    Mutex::new(LogStorage::with_capacity(DISCARD_ERROR.len()));
+const DISCARD_ERROR: &str = "log discarded: too large for storage";
+
+#[derive(Clone, Copy)]
+pub struct SharedLogger {
+    inner: &'static RefCell<LogStorage>,
+}
+
+pub fn init(capacity: usize) -> SharedLogger {
+    // Ensure we have enough space to store the error about not having enough space.
+    if capacity < DISCARD_ERROR.len() {
+        panic!("minimum log storage capacity is {}", DISCARD_ERROR.len());
+    }
+
+    let storage = LogStorage::with_capacity(capacity);
+    SharedLogger {
+        inner: Box::leak(Box::new(RefCell::new(storage))),
+    }
+}
 
 struct LogStorage {
     records: VecDeque<Record>,
@@ -50,8 +58,6 @@ impl Display for Level {
         }
     }
 }
-
-const DISCARD_ERROR: &str = "log discarded: too large for storage";
 
 impl LogStorage {
     const fn with_capacity(capacity: usize) -> Self {
@@ -93,42 +99,28 @@ impl LogStorage {
         self.utilization = 0;
         self.records.clear();
     }
+}
 
-    fn iter(&self) -> vec_deque::Iter<Record> {
-        self.records.iter()
+impl SharedLogger {
+    pub fn trace(&self, text: impl Into<String>) {
+        self.inner.borrow_mut().add_record(Level::Trace, text);
     }
-}
-
-pub async fn init(capacity: usize) {
-    // Ensure we have enough space to store the error about not having enough space.
-    if capacity < DISCARD_ERROR.len() {
-        panic!("minimum log storage capacity is {}", DISCARD_ERROR.len());
+    pub fn debug(&self, text: impl Into<String>) {
+        self.inner.borrow_mut().add_record(Level::Debug, text);
     }
-
-    let storage = LogStorage::with_capacity(capacity);
-
-    *GLOBAL_LOGGER.lock().await = storage;
-}
-
-pub async fn trace(text: impl Into<String>) {
-    GLOBAL_LOGGER.lock().await.add_record(Level::Trace, text);
-}
-pub async fn debug(text: impl Into<String>) {
-    GLOBAL_LOGGER.lock().await.add_record(Level::Debug, text);
-}
-pub async fn info(text: impl Into<String>) {
-    GLOBAL_LOGGER.lock().await.add_record(Level::Info, text);
-}
-pub async fn warn(text: impl Into<String>) {
-    GLOBAL_LOGGER.lock().await.add_record(Level::Warn, text);
-}
-pub async fn error(text: impl Into<String>) {
-    GLOBAL_LOGGER.lock().await.add_record(Level::Error, text);
-}
-pub async fn clear() {
-    GLOBAL_LOGGER.lock().await.clear();
-}
-pub async fn records() -> MappedMutexGuard<'static, CriticalSectionRawMutex, VecDeque<Record>> {
-    let guard = GLOBAL_LOGGER.lock().await;
-    MutexGuard::map(guard, |storage| &mut storage.records)
+    pub fn info(&self, text: impl Into<String>) {
+        self.inner.borrow_mut().add_record(Level::Info, text);
+    }
+    pub fn warn(&self, text: impl Into<String>) {
+        self.inner.borrow_mut().add_record(Level::Warn, text);
+    }
+    pub fn error(&self, text: impl Into<String>) {
+        self.inner.borrow_mut().add_record(Level::Error, text);
+    }
+    pub fn clear(&self) {
+        self.inner.borrow_mut().clear();
+    }
+    pub fn records(&self) -> core::cell::Ref<'_, VecDeque<Record>> {
+        core::cell::Ref::map(self.inner.borrow(), |storage| &storage.records)
+    }
 }

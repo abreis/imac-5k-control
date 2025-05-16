@@ -1,7 +1,8 @@
-use super::pin_control::PINCONTROL_CHANNEL;
+use super::pin_control::PinControlChannel;
 use crate::{
-    memlog, power,
-    state::{self, State},
+    memlog::{self, SharedLogger},
+    power,
+    state::{SharedState, State},
 };
 use embassy_time::Duration;
 use esp_hal::gpio;
@@ -10,7 +11,12 @@ const BUTTON_HELD_DURATION_MIN: Duration = Duration::from_millis(500);
 const BUTTON_HELD_DURATION_MAX: Duration = Duration::from_millis(2000);
 
 #[embassy_executor::task]
-pub async fn case_button(pin: gpio::AnyPin) {
+pub async fn case_button(
+    state: SharedState,
+    pin: gpio::AnyPin,
+    pincontrol_channel: PinControlChannel,
+    memlog: SharedLogger,
+) {
     // Initialize the pin with a pull-up. The button is wired to GND.
     let mut case_pin =
         gpio::Input::new(pin, gpio::InputConfig::default().with_pull(gpio::Pull::Up));
@@ -27,13 +33,17 @@ pub async fn case_button(pin: gpio::AnyPin) {
 
         let held_duration = fall_time.elapsed();
         if held_duration > BUTTON_HELD_DURATION_MIN {
-            memlog::debug("case button triggered").await;
+            memlog.debug("case button triggered");
 
-            match state::get().await {
-                State::Standby => power::power_on().await.unwrap(),
-                State::DisplayOn => power::power_off().await.unwrap(),
+            match state.get() {
+                State::Standby => power::power_on(state, pincontrol_channel, memlog)
+                    .await
+                    .unwrap(),
+                State::DisplayOn => power::power_off(state, pincontrol_channel, memlog)
+                    .await
+                    .unwrap(),
                 _invalid_state => {
-                    memlog::warn("case button pressed while in invalid state, ignored").await
+                    memlog.warn("case button pressed while in invalid state, ignored")
                 }
             }
         }

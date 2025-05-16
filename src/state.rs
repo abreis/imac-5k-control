@@ -1,10 +1,13 @@
-use core::{cell::Cell, ops::Deref};
+use alloc::boxed::Box;
+use anyhow::{Result, anyhow};
+use core::cell::Cell;
 
-use anyhow::anyhow;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-
-static DISPLAY_STATE: Mutex<CriticalSectionRawMutex, Cell<State>> =
-    Mutex::new(Cell::new(State::Standby));
+// Embassy tasks are statically allocated. This is a version of the state that can be
+// shared between tasks without the need for critical_section.
+#[derive(Clone, Copy)]
+pub struct SharedState {
+    inner: &'static Cell<State>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -18,34 +21,40 @@ pub enum State {
     PoweringOff,
 }
 
-async fn try_transition(valid_from: State, transition_to: State) -> anyhow::Result<()> {
-    let state = DISPLAY_STATE.lock().await;
-    if state.get() == valid_from {
-        state.replace(transition_to);
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "Invalid state transition: can't transition to {transition_to:?}"
-        ))
+impl SharedState {
+    pub fn new_standby() -> Self {
+        Self {
+            inner: Box::leak(Box::new(Cell::new(State::Standby))),
+        }
     }
-}
 
-pub async fn to_standby() -> anyhow::Result<()> {
-    try_transition(State::PoweringOff, State::Standby).await
-}
+    fn try_transition(&self, valid_from: State, transition_to: State) -> Result<()> {
+        if self.inner.get() == valid_from {
+            self.inner.replace(transition_to);
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Invalid state transition: can't transition to {transition_to:?}"
+            ))
+        }
+    }
+    pub fn to_standby(&self) -> Result<()> {
+        self.try_transition(State::PoweringOff, State::Standby)
+    }
 
-pub async fn to_powering_on() -> anyhow::Result<()> {
-    try_transition(State::Standby, State::PoweringOn).await
-}
+    pub fn to_powering_on(&self) -> Result<()> {
+        self.try_transition(State::Standby, State::PoweringOn)
+    }
 
-pub async fn to_display_on() -> anyhow::Result<()> {
-    try_transition(State::PoweringOn, State::DisplayOn).await
-}
+    pub fn to_display_on(&self) -> Result<()> {
+        self.try_transition(State::PoweringOn, State::DisplayOn)
+    }
 
-pub async fn to_powering_off() -> anyhow::Result<()> {
-    try_transition(State::DisplayOn, State::PoweringOff).await
-}
+    pub fn to_powering_off(&self) -> Result<()> {
+        self.try_transition(State::DisplayOn, State::PoweringOff)
+    }
 
-pub async fn get() -> State {
-    DISPLAY_STATE.lock().await.get()
+    pub fn get(&self) -> State {
+        self.inner.get()
+    }
 }
