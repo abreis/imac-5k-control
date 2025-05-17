@@ -1,10 +1,13 @@
-use super::{fan_duty::FanDutySignal, pin_control::PinControlChannel};
+use super::{
+    fan_duty::FanDutySignal, pin_control::PinControlChannel, temp_sensor::TempSensorDynReceiver,
+};
 use crate::{
     memlog::{self, SharedLogger},
     state::SharedState,
     task::pin_control::{OnOff, PinControlMessage},
 };
 use alloc::{format, string::String};
+use embassy_futures::select;
 use embassy_time::{Duration, Timer};
 use esp_hal::{Async, gpio, uart};
 
@@ -38,6 +41,7 @@ pub async fn serial_console(
     pin_uart_tx: gpio::AnyPin,
     pincontrol_channel: PinControlChannel,
     fanduty_signal: FanDutySignal,
+    mut tempsensor_receiver: TempSensorDynReceiver,
     state: SharedState,
     memlog: SharedLogger,
 ) {
@@ -72,6 +76,7 @@ pub async fn serial_console(
                     &mut uart,
                     pincontrol_channel,
                     fanduty_signal,
+                    &mut tempsensor_receiver,
                     state,
                     memlog,
                 )
@@ -97,6 +102,7 @@ async fn cli_parser(
     uart: &mut uart::Uart<'static, Async>,
     pincontrol_channel: PinControlChannel,
     fanduty_signal: FanDutySignal,
+    tempsensor_receiver: &mut TempSensorDynReceiver,
     state: SharedState,
     memlog: SharedLogger,
 ) -> Result<(), uart::TxError> {
@@ -104,8 +110,8 @@ async fn cli_parser(
 
     // Get the command from the first argument.
     let mut chunks = line.split_whitespace();
-    let response = match chunks.next() {
-        Some("help") => {
+    let response = match (chunks.next(), chunks.next()) {
+        (Some("help"), None) => {
             "button\r\n\
              · power\r\n\
              · menu\r\n\
@@ -118,123 +124,147 @@ async fn cli_parser(
              fan\r\n\
              · pwm <duty>\r\n\
              · tachy\r\n\
+             temp\r\n\
+             · read\r\n\
+             · watch\r\n\
+             state\r\n\
+             · read\r\n\
              log\r\n\
              · read\r\n\
              · clear"
         }
 
         // Trigger display controller buttons.
-        Some("button") => match chunks.next() {
-            Some("power") => {
-                pincontrol_channel
-                    .send(PinControlMessage::ButtonPower)
-                    .await;
-                "Triggered button 'power'"
-            }
-            Some("menu") => {
-                pincontrol_channel.send(PinControlMessage::ButtonMenu).await;
-                "Triggered button 'menu'"
-            }
-            Some("enter") => {
-                pincontrol_channel
-                    .send(PinControlMessage::ButtonEnter)
-                    .await;
-                "Triggered button 'enter'"
-            }
-            Some("down") => {
-                pincontrol_channel.send(PinControlMessage::ButtonDown).await;
-                "Triggered button 'down'"
-            }
-            Some("up") => {
-                pincontrol_channel.send(PinControlMessage::ButtonUp).await;
-                "Triggered button 'up'"
-            }
-            None => "Subcommand required for 'button'",
-            _ => "Invalid subcommand for 'button'",
-        },
+        (Some("button"), Some("power")) => {
+            pincontrol_channel
+                .send(PinControlMessage::ButtonPower)
+                .await;
+            "Triggered button 'power'"
+        }
+        (Some("button"), Some("menu")) => {
+            pincontrol_channel.send(PinControlMessage::ButtonMenu).await;
+            "Triggered button 'menu'"
+        }
+        (Some("button"), Some("enter")) => {
+            pincontrol_channel
+                .send(PinControlMessage::ButtonEnter)
+                .await;
+            "Triggered button 'enter'"
+        }
+        (Some("button"), Some("down")) => {
+            pincontrol_channel.send(PinControlMessage::ButtonDown).await;
+            "Triggered button 'down'"
+        }
+        (Some("button"), Some("up")) => {
+            pincontrol_channel.send(PinControlMessage::ButtonUp).await;
+            "Triggered button 'up'"
+        }
+        (Some("button"), Some(_)) => "Invalid subcommand for 'button'",
+        (Some("button"), None) => "Subcommand required for 'button'",
 
         // Control 24V power to display.
-        Some("power") => match chunks.next() {
-            Some("display") => match chunks.next() {
-                Some("on") => {
-                    pincontrol_channel
-                        .send(PinControlMessage::DisplayPower(On))
-                        .await;
-                    "Display power turned on"
-                }
-                Some("off") => {
-                    pincontrol_channel
-                        .send(PinControlMessage::DisplayPower(Off))
-                        .await;
-                    "Display power turned off"
-                }
-                None => "Subcommand required for 'power display'",
-                _ => "Invalid subcommand for 'power display'",
-            },
-            Some("fan") => match chunks.next() {
-                Some("on") => {
-                    pincontrol_channel
-                        .send(PinControlMessage::FanPower(On))
-                        .await;
-                    "Fan power turned on"
-                }
-                Some("off") => {
-                    pincontrol_channel
-                        .send(PinControlMessage::FanPower(Off))
-                        .await;
-                    "Fan power turned off"
-                }
-                None => "Subcommand required for 'power fan'",
-                _ => "Invalid subcommand for 'power fan'",
-            },
-            None => "Subcommand required for 'power'",
-            _ => "Invalid subcommand for 'power'",
+        (Some("power"), Some("display")) => match chunks.next() {
+            Some("on") => {
+                pincontrol_channel
+                    .send(PinControlMessage::DisplayPower(On))
+                    .await;
+                "Display power turned on"
+            }
+            Some("off") => {
+                pincontrol_channel
+                    .send(PinControlMessage::DisplayPower(Off))
+                    .await;
+                "Display power turned off"
+            }
+            None => "Subcommand required for 'power display'",
+            _ => "Invalid subcommand for 'power display'",
         },
+        (Some("power"), Some("fan")) => match chunks.next() {
+            Some("on") => {
+                pincontrol_channel
+                    .send(PinControlMessage::FanPower(On))
+                    .await;
+                "Fan power turned on"
+            }
+            Some("off") => {
+                pincontrol_channel
+                    .send(PinControlMessage::FanPower(Off))
+                    .await;
+                "Fan power turned off"
+            }
+            None => "Subcommand required for 'power fan'",
+            _ => "Invalid subcommand for 'power fan'",
+        },
+        (Some("power"), Some(_)) => "Invalid subcommand for 'power'",
+        (Some("power"), None) => "Subcommand required for 'power'",
 
         // Fan controls, duty cycle and tachometer.
-        Some("fan") => match chunks.next() {
-            Some("pwm") => match chunks.next() {
-                Some(pwm_value) => match pwm_value.parse::<u8>() {
-                    Ok(value) => {
-                        if (0..=100).contains(&value) {
-                            fanduty_signal.signal(value);
-                            "Fan duty set"
-                        } else {
-                            "Fan duty value must be between 0 and 100"
-                        }
+        (Some("fan"), Some("pwm")) => match chunks.next() {
+            Some(pwm_value) => match pwm_value.parse::<u8>() {
+                Ok(value) => {
+                    if (0..=100).contains(&value) {
+                        fanduty_signal.signal(value);
+                        "Fan duty set"
+                    } else {
+                        "Fan duty value must be between 0 and 100"
                     }
-                    Err(_parse_error) => "Failed to parse fan duty value",
-                },
-                None => "Fan duty value required for 'fan pwm'",
+                }
+                Err(_parse_error) => "Failed to parse fan duty value",
             },
-            Some("tachy") => "TODO: Fan tachometer readout",
-            None => "Subcommand required for 'fan'",
-            _ => "Invalid subcommand for 'fan'",
+            None => "Fan duty value required for 'fan pwm'",
         },
+        (Some("fan"), Some("tachy")) => "TODO: Fan tachometer readout",
+        (Some("fan"), Some(_)) => "Invalid subcommand for 'fan'",
+        (Some("fan"), None) => "Subcommand required for 'fan'",
 
         // Log control.
-        Some("log") => match chunks.next() {
-            Some("read") => {
-                // Note: this locks the entire memlog while it is being printed.
-                for record in memlog.records().iter().rev() {
-                    let timestamp = format_milliseconds_to_hms(record.instant.as_millis());
-                    let formatted =
-                        format!("[{}] {}: {}\r\n", timestamp, record.level, record.text);
-                    uart.write_all_async(formatted.as_bytes()).await?;
-                }
-                ""
+        (Some("log"), Some("read")) => {
+            // Note: this locks the entire memlog while it is being printed.
+            for record in memlog.records().iter().rev() {
+                let timestamp = format_milliseconds_to_hms(record.instant.as_millis());
+                let formatted = format!("[{}] {}: {}\r\n", timestamp, record.level, record.text);
+                uart.write_all_async(formatted.as_bytes()).await?;
             }
-            Some("clear") => {
-                memlog.clear();
-                "Logs cleared"
+            ""
+        }
+        (Some("log"), Some("clear")) => {
+            memlog.clear();
+            "Logs cleared"
+        }
+        (Some("log"), Some(_)) => "Invalid subcommand for 'log'",
+        (Some("log"), None) => "Subcommand required for 'log'",
+
+        // Temp sensor.
+        (Some("temp"), Some("read")) => {
+            let sensor_result = tempsensor_receiver.get().await;
+            &format!("temp sensor: {:?}", sensor_result)
+        }
+        (Some("temp"), Some("watch")) => {
+            let mut buf = [0u8; 4];
+            'watch_loop: loop {
+                // Watch for changes in the temperature sensor until the user interrupts with any key.
+                let wait_for_sensor = tempsensor_receiver.changed();
+                let wait_for_input = uart.read_async(&mut buf);
+                match select::select(wait_for_sensor, wait_for_input).await {
+                    select::Either::First(sensor_result) => {
+                        let formatted = &format!("{:?}\r\n", sensor_result);
+                        uart.write_all_async(formatted.as_bytes()).await?;
+                    }
+                    select::Either::Second(_bytes_read) => break 'watch_loop,
+                };
             }
-            None => "Subcommand required for 'log'",
-            _ => "Invalid subcommand for 'log'",
-        },
+            ""
+        }
 
-        Some("state") => &format!("Display state: {:?}", state.get()),
+        (Some("temp"), Some(_)) => "Invalid subcommand for 'temp'",
+        (Some("temp"), None) => "Subcommand required for 'temp'",
 
-        None => "Please enter a command",
+        // Display state.
+        (Some("state"), Some("read")) => &format!("Display state: {:?}", state.get()),
+        (Some("state"), Some(_)) => "Invalid subcommand for 'state'",
+        (Some("state"), None) => "Subcommand required for 'state'",
+
+        (None, None) => "Please enter a command",
         _ => "Unrecognized command",
     };
 

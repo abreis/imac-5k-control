@@ -13,6 +13,7 @@ mod memlog;
 mod power;
 mod state;
 mod task;
+mod vendor;
 
 use core::result::Result;
 use embassy_executor::{SpawnError, Spawner};
@@ -21,12 +22,15 @@ use esp_hal::clock::CpuClock;
 use esp_hal::gpio;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_println::println;
+use task::temp_sensor;
 
 // NOTES
 // - esp_println sends prints to 'jtag-serial' via the USB port (set in Cargo.toml)
 //
 // TODO
 // - we can probably run at a lower clock speed (runs less hot)
+
+const TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -57,13 +61,7 @@ async fn main(spawner: Spawner) {
     // G4 reads the case button, which pulls the line to GND when pressed.
     let pin_button_case = peripherals.GPIO4;
     // G0 commands the DS18B20 temperature sensor, which is phantom-powered.
-    let _pin_sensor_temp = gpio::Output::new(
-        peripherals.GPIO0,
-        gpio::Level::High,
-        gpio::OutputConfig::default()
-            .with_pull(gpio::Pull::Up)
-            .with_drive_strength(gpio::DriveStrength::_40mA),
-    );
+    let pin_sensor_temp = peripherals.GPIO0;
     // G3 goes to the Power MOSFET gate that switches 24VDC power on to the display controller.
     // IRLZ44N I_gate = 48nC * 1Hz = 48nA (current depends on switching frequency)
     let pin_power_display = gpio::Output::new(peripherals.GPIO3, gpio::Level::Low, output_5ma);
@@ -97,6 +95,9 @@ async fn main(spawner: Spawner) {
     // Get a shareable channel to send messages to the pincontrol task.
     let pincontrol_channel = task::pin_control::init();
 
+    // Get a watcher to await changes in temperature sensor readings.
+    let tempsensor_watch = temp_sensor::init();
+
     //
     // Spawn tasks.
     || -> Result<(), SpawnError> {
@@ -116,6 +117,7 @@ async fn main(spawner: Spawner) {
             pin_uart_tx.into(),
             pincontrol_channel,
             fanduty_signal,
+            tempsensor_watch.dyn_receiver().unwrap(),
             state,
             memlog,
         ))?;
@@ -127,6 +129,14 @@ async fn main(spawner: Spawner) {
         ))?;
 
         spawner.spawn(task::fan_duty(pwm_channel, fanduty_signal))?;
+
+        // Take a temperature measurement every 10 seconds.
+        spawner.spawn(task::temp_sensor(
+            pin_sensor_temp.into(),
+            TEMP_SENSOR_ADDRESS,
+            tempsensor_watch.dyn_sender(),
+            10,
+        ))?;
 
         Ok(())
     }()
