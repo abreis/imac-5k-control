@@ -1,3 +1,4 @@
+use super::temp_sensor::TempSensorDynReceiver;
 use alloc::boxed::Box;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal};
 use esp_hal::{
@@ -54,5 +55,27 @@ pub async fn fan_duty(
         // Wait for a new duty cycle to be signalled.
         let new_fan_duty = signal.wait().await;
         pwm_channel.set_duty(new_fan_duty).unwrap(); // Does not fail if timer and channel are configured, and duty ∈ [0,100]
+    }
+}
+
+/// Sets the fan duty based on the sensed temperature.
+#[embassy_executor::task]
+pub async fn fan_temp_control(
+    _fanduty_signal: FanDutySignal,
+    mut tempsensor_receiver: TempSensorDynReceiver,
+) {
+    let mut last_temp = 0f32;
+    loop {
+        if let Ok(sensor_data) = tempsensor_receiver.changed().await {
+            if sensor_data.temperature != last_temp {
+                last_temp = sensor_data.temperature;
+
+                // Apply curve, temperature-to-duty.
+                // TODO: run the display for some time and note temperature ranges at multiply fan duties.
+                let _new_fan_duty = 100;
+
+                // fanduty_signal.signal(new_fan_duty);
+            }
+        }
     }
 }

@@ -26,7 +26,7 @@ pub async fn temp_sensor(
     onewire_pin: gpio::AnyPin,
     sensor_address: u64,
     tempsensor_sender: TempSensorDynSender,
-    loop_secs: u64,
+    loop_interval: Duration,
 ) {
     let mut one_wire_pin = gpio::Flex::new(onewire_pin);
     one_wire_pin.enable_input(true);
@@ -40,9 +40,9 @@ pub async fn temp_sensor(
     let mut blocking_delay = embassy_time::Delay;
 
     loop {
-        Timer::after(Duration::from_secs(loop_secs)).await;
+        Timer::after(loop_interval).await;
 
-        // Attempt to catch errors from
+        // Attempt to catch errors from 1Wire.
         let sensor_reading =
             async || -> Result<ds18b20::SensorData, OneWireError<core::convert::Infallible>> {
                 // Begin a measurement and wait for it to complete.

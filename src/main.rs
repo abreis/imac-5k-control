@@ -17,6 +17,7 @@ mod vendor;
 
 use core::result::Result;
 use embassy_executor::{SpawnError, Spawner};
+use embassy_time::Duration;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio;
@@ -131,11 +132,18 @@ async fn main(spawner: Spawner) {
         spawner.spawn(task::fan_duty(pwm_channel, fanduty_signal))?;
 
         // Take a temperature measurement every 10 seconds.
+        const TEMP_MEASUREMENT_INTERVAL: Duration = Duration::from_secs(5);
         spawner.spawn(task::temp_sensor(
             pin_sensor_temp.into(),
             TEMP_SENSOR_ADDRESS,
             tempsensor_watch.dyn_sender(),
-            10,
+            TEMP_MEASUREMENT_INTERVAL,
+        ))?;
+
+        // Keep adjusting the fan duty based on the temperature measurements.
+        spawner.spawn(task::fan_temp_control(
+            fanduty_signal,
+            tempsensor_watch.dyn_receiver().unwrap(),
         ))?;
 
         Ok(())

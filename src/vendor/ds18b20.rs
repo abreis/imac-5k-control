@@ -243,7 +243,7 @@ where
     let resolution = if let Some(resolution) = Resolution::from_config_register(scratchpad[4]) {
         resolution
     } else {
-        return Err(OneWireError::CrcMismatch);
+        return Err(OneWireError::InvalidResolution);
     };
     let raw_temp = i16::from_le_bytes([scratchpad[0], scratchpad[1]]);
     let temperature = match resolution {
