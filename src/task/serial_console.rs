@@ -1,6 +1,7 @@
 use super::{fan_duty::FanDutySignal, pin_control::PinControlChannel};
 use crate::{
     memlog::{self, SharedLogger},
+    state::SharedState,
     task::pin_control::{OnOff, PinControlMessage},
 };
 use alloc::{format, string::String};
@@ -37,6 +38,7 @@ pub async fn serial_console(
     pin_uart_tx: gpio::AnyPin,
     pincontrol_channel: PinControlChannel,
     fanduty_signal: FanDutySignal,
+    state: SharedState,
     memlog: SharedLogger,
 ) {
     // UART setup. When in loopback mode, ensure TX is configured first (#2914).
@@ -65,7 +67,15 @@ pub async fn serial_console(
             let prompt = "> ";
             // Note: Ctrl-C and Ctrl-D break the readline while loop.
             while let Ok(line) = editor.readline(prompt, &mut uart).await {
-                cli_parser(line, &mut uart, pincontrol_channel, fanduty_signal, memlog).await?;
+                cli_parser(
+                    line,
+                    &mut uart,
+                    pincontrol_channel,
+                    fanduty_signal,
+                    state,
+                    memlog,
+                )
+                .await?;
             }
 
             Ok(())
@@ -87,6 +97,7 @@ async fn cli_parser(
     uart: &mut uart::Uart<'static, Async>,
     pincontrol_channel: PinControlChannel,
     fanduty_signal: FanDutySignal,
+    state: SharedState,
     memlog: SharedLogger,
 ) -> Result<(), uart::TxError> {
     use OnOff::*;
@@ -220,6 +231,8 @@ async fn cli_parser(
             None => "Subcommand required for 'log'",
             _ => "Invalid subcommand for 'log'",
         },
+
+        Some("state") => &format!("Display state: {:?}", state.get()),
 
         None => "Please enter a command",
         _ => "Unrecognized command",

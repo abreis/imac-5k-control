@@ -40,7 +40,8 @@ async fn main(spawner: Spawner) {
     // A default output config with a 5mA drive strength.
     let output_5ma = gpio::OutputConfig::default().with_drive_strength(gpio::DriveStrength::_5mA);
     // Unused pins, taken here so they aren't used accidentally.
-    let _pin9_unused = peripherals.GPIO9;
+    let _pin18_unused = peripherals.GPIO18;
+    let _pin19_unused = peripherals.GPIO19;
     // Onboard LED on the M5Stamp C3U.
     let _pin_led_onboard = peripherals.GPIO2;
     // UART pins.
@@ -72,7 +73,9 @@ async fn main(spawner: Spawner) {
     // // G18 reads the tachometer in the case fan.
     // let _pin_fan_tachy = gpio::Input::new(peripherals.GPIO18, gpio::InputConfig::default());
     // G19 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
-    let pin_fan_pwm = gpio::Output::new(peripherals.GPIO19, gpio::Level::High, output_5ma);
+    // let pin_fan_pwm = gpio::Output::new(peripherals.GPIO19, gpio::Level::High, output_5ma);
+    // Note: this is a strapping pin. Should be safe to use as an output.
+    let pin_fan_pwm = gpio::Output::new(peripherals.GPIO9, gpio::Level::High, output_5ma);
 
     //
     // Resume initialization.
@@ -113,6 +116,7 @@ async fn main(spawner: Spawner) {
             pin_uart_tx.into(),
             pincontrol_channel,
             fanduty_signal,
+            state,
             memlog,
         ))?;
         spawner.spawn(task::case_button(
