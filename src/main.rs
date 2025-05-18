@@ -9,11 +9,12 @@
 
 extern crate alloc;
 
+mod ds18b20;
 mod memlog;
+mod onewire;
 mod power;
 mod state;
 mod task;
-mod vendor;
 
 use core::result::Result;
 use embassy_executor::{SpawnError, Spawner};
@@ -23,7 +24,6 @@ use esp_hal::clock::CpuClock;
 use esp_hal::gpio;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_println::println;
-use task::temp_sensor;
 
 // NOTES
 // - esp_println sends prints to 'jtag-serial' via the USB port (set in Cargo.toml)
@@ -97,7 +97,7 @@ async fn main(spawner: Spawner) {
     let pincontrol_channel = task::pin_control::init();
 
     // Get a watcher to await changes in temperature sensor readings.
-    let tempsensor_watch = temp_sensor::init();
+    let tempsensor_watch = task::temp_sensor::init();
 
     //
     // Spawn tasks.

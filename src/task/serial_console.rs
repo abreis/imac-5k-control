@@ -237,12 +237,12 @@ async fn cli_parser(
         // Temp sensor.
         (Some("temp"), Some("read")) => {
             let sensor_result = tempsensor_receiver.get().await;
-            &format!("temp sensor: {:?}", sensor_result)
+            &format!("{:?}", sensor_result)
         }
         (Some("temp"), Some("watch")) => {
-            let mut buf = [0u8; 4];
+            let mut buf = [0u8; 1];
             'watch_loop: loop {
-                // Watch for changes in the temperature sensor until the user interrupts with any key.
+                // Watch for changes in the temperature sensor until the user interrupts.
                 let wait_for_sensor = tempsensor_receiver.changed();
                 let wait_for_input = uart.read_async(&mut buf);
                 match select::select(wait_for_sensor, wait_for_input).await {
@@ -250,7 +250,14 @@ async fn cli_parser(
                         let formatted = &format!("{:?}\r\n", sensor_result);
                         uart.write_all_async(formatted.as_bytes()).await?;
                     }
-                    select::Either::Second(_bytes_read) => break 'watch_loop,
+                    select::Either::Second(bytes_read) => {
+                        // Accept a Ctrl-C or Ctrl-D to interrupt (ASCII End of Text, End of Transmission)
+                        if let Ok(1) = bytes_read {
+                            if (buf[0] == 0x03) | (buf[0] == 0x04) {
+                                break 'watch_loop;
+                            }
+                        }
+                    }
                 };
             }
             ""

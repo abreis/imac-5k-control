@@ -1,6 +1,6 @@
-use crate::vendor::{
-    ds18b20::{self, Ds18b20},
-    one_wire_bus::{self, OneWire, OneWireError},
+use crate::{
+    ds18b20::{DS18B20Error, Ds18b20, Resolution, SensorData},
+    onewire::OneWireBus,
 };
 use alloc::{boxed::Box, format, string::String};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, pubsub, signal, watch};
@@ -15,7 +15,7 @@ pub type TempSensorWatch =
 pub type TempSensorDynSender = watch::DynSender<'static, TempSensorReading>;
 pub type TempSensorDynReceiver = watch::DynReceiver<'static, TempSensorReading>;
 
-pub type TempSensorReading = Result<ds18b20::SensorData, OneWireError<core::convert::Infallible>>;
+pub type TempSensorReading = Result<SensorData, DS18B20Error>;
 
 pub fn init() -> TempSensorWatch {
     Box::leak(Box::new(watch::Watch::new()))
@@ -28,38 +28,26 @@ pub async fn temp_sensor(
     tempsensor_sender: TempSensorDynSender,
     loop_interval: Duration,
 ) {
-    let mut one_wire_pin = gpio::Flex::new(onewire_pin);
-    one_wire_pin.enable_input(true);
-    one_wire_pin.set_drive_strength(gpio::DriveStrength::_40mA);
-    one_wire_pin.set_as_open_drain(gpio::Pull::Up);
-    let mut onewire_bus = OneWire::new(one_wire_pin).unwrap();
-
-    let sensor_addr = one_wire_bus::Address(sensor_address);
-    let sensor = Ds18b20::new::<core::convert::Infallible>(sensor_addr).unwrap();
-
-    let mut blocking_delay = embassy_time::Delay;
+    let onewire_bus = OneWireBus::new(onewire_pin);
+    let mut sensor = Ds18b20::new(sensor_address, onewire_bus).unwrap();
 
     loop {
         Timer::after(loop_interval).await;
 
         // Attempt to catch errors from 1Wire.
-        let sensor_reading =
-            async || -> Result<ds18b20::SensorData, OneWireError<core::convert::Infallible>> {
-                // Begin a measurement and wait for it to complete.
-                sensor.start_temp_measurement(&mut onewire_bus, &mut blocking_delay)?;
-                Timer::after(Duration::from_millis(750)).await; // 750ms for 12bit resolution (default)
+        let sensor_reading = async || -> Result<SensorData, DS18B20Error> {
+            // Begin a measurement and wait for it to complete.
+            sensor.start_temp_measurement()?;
 
-                let data = sensor.read_data(&mut onewire_bus, &mut blocking_delay)?;
+            // 12bit resolution is the default, expects a 750ms wait time.
+            let wait_time = Resolution::Bits12.max_measurement_time();
+            Timer::after(wait_time).await;
 
-                Ok(data)
-            }()
-            .await;
+            let data = sensor.read_sensor_data()?;
 
-        // Translate the result into
-        // let sensor_reading = match catch {
-        //     Ok(data) => TempSensorReading::Temperature(data.temperature),
-        //     Err(error) => TempSensorReading::Error(error),
-        // };
+            Ok(data)
+        }()
+        .await;
 
         tempsensor_sender.send(sensor_reading);
     }
