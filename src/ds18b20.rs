@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::onewire::{OneWireBus, OneWireBusError};
+use crate::onewire::{self, OneWireBus, OneWireBusError};
 use embassy_time::Duration;
 
 const FAMILY_CODE: u8 = 0x28;
@@ -31,7 +31,7 @@ impl Ds18b20 {
         self.bus.match_address(self.address);
         self.bus.write_byte(command::READ_SCRATCHPAD);
         self.bus.read_bytes(&mut scratchpad);
-        Self::check_crc8(&scratchpad)?;
+        onewire::crc::check_crc8(&scratchpad)?;
         Ok(scratchpad)
     }
 
@@ -54,37 +54,6 @@ impl Ds18b20 {
             alarm_temp_high: i8::from_le_bytes([scratchpad[2]]),
             alarm_temp_low: i8::from_le_bytes([scratchpad[3]]),
         })
-    }
-
-    fn check_crc8(data: &[u8]) -> Result<(), DS18B20Error> {
-        let mut crc = 0;
-        for byte_val in data {
-            let mut current_byte = *byte_val;
-            for _ in 0..8 {
-                // Extract LSB of current_byte and LSB of crc. XOR them.
-                // `current_byte & 0x01` is the LSB of the data byte.
-                // `crc & 0x01` is the LSB of the current CRC value.
-                let xor_lsbs = (current_byte ^ crc) & 0x01;
-
-                // Shift CRC register right by 1.
-                crc >>= 1;
-
-                // If the XOR of LSBs was 1, XOR crc with the polynomial.
-                if xor_lsbs != 0 {
-                    crc ^= 0x8C; // Using the bit-reversed polynomial.
-                }
-
-                // Shift current_byte right to get the next bit in the next iteration.
-                // This effectively processes the byte LSB-first.
-                current_byte >>= 1;
-            }
-        }
-
-        if crc == 0 {
-            Ok(())
-        } else {
-            Err(DS18B20Error::ChecksumFailed)
-        }
     }
 }
 
@@ -134,7 +103,6 @@ pub enum DS18B20Error {
     OneWireError(OneWireBusError),
     InvalidResolution,
     FamilyCodeMismatch,
-    ChecksumFailed,
 }
 
 impl From<OneWireBusError> for DS18B20Error {
