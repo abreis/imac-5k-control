@@ -24,17 +24,17 @@ embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 esp-alloc = "0.7.0"
 esp-backtrace = { version = "0.15.1", features = [
-    "esp32c3",
+    "esp32c6",
     "exception-handler",
     "panic-handler",
     "println",
 ] }
-esp-hal = { version = "1.0.0-beta.0", features = ["esp32c3", "unstable"] }
-esp-hal-embassy = { version = "0.7.0", features = ["esp32c3"] }
+esp-hal = { version = "1.0.0-beta.0", features = ["esp32c6", "unstable"] }
+esp-hal-embassy = { version = "0.7.0", features = ["esp32c6"] }
 esp-println = { version = "0.13.0", default-features = false, features = [
     "colors",
     "critical-section",
-    "esp32c3",
+    "esp32c6",
     # Force JTAG output even if USB is not connected, otherwise it clobbers UART0.
     "jtag-serial",
 ] }
@@ -52,6 +52,7 @@ debug-assertions = false
 incremental = false
 lto = 'fat'
 # opt-level 2 or 3 is required for WiFi.
-opt-level = 3
-# opt-level = 's'
+# opt-level 3 codegen is sometimes bonkers.
+# opt-level 's' optimized for size.
+opt-level = 2
 overflow-checks = false
