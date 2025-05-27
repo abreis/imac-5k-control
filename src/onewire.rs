@@ -149,9 +149,17 @@ impl OneWireBus {
         }
 
         // Validate the discovered address.
-        crc::check_crc8(&address.to_le_bytes())?;
+        Self::check_crc8(&address.to_le_bytes())?;
 
         Ok(address)
+    }
+
+    pub fn check_crc8(data: &[u8]) -> Result<(), OneWireBusError> {
+        const CRC_MAXIM: crc::Crc<u8> = crc::Crc::<u8>::new(&crc::CRC_8_MAXIM_DOW);
+        if CRC_MAXIM.checksum(data) != 0 {
+            return Err(OneWireBusError::ChecksumFailed);
+        }
+        Ok(())
     }
 
     /// Returns an error if no device responds to the reset pulse.
@@ -296,37 +304,37 @@ pub enum OneWireBusError {
     ChecksumFailed,
 }
 
-pub mod crc {
-    use super::OneWireBusError;
+// pub mod crc {
+//     use super::OneWireBusError;
 
-    pub fn check_crc8(data: &[u8]) -> Result<(), OneWireBusError> {
-        let mut crc = 0;
-        for byte_val in data {
-            let mut current_byte = *byte_val;
-            for _ in 0..8 {
-                // Extract LSB of current_byte and LSB of crc. XOR them.
-                // `current_byte & 0x01` is the LSB of the data byte.
-                // `crc & 0x01` is the LSB of the current CRC value.
-                let xor_lsbs = (current_byte ^ crc) & 0x01;
+//     pub fn check_crc8(data: &[u8]) -> Result<(), OneWireBusError> {
+//         let mut crc = 0;
+//         for byte_val in data {
+//             let mut current_byte = *byte_val;
+//             for _ in 0..8 {
+//                 // Extract LSB of current_byte and LSB of crc. XOR them.
+//                 // `current_byte & 0x01` is the LSB of the data byte.
+//                 // `crc & 0x01` is the LSB of the current CRC value.
+//                 let xor_lsbs = (current_byte ^ crc) & 0x01;
 
-                // Shift CRC register right by 1.
-                crc >>= 1;
+//                 // Shift CRC register right by 1.
+//                 crc >>= 1;
 
-                // If the XOR of LSBs was 1, XOR crc with the polynomial.
-                if xor_lsbs != 0 {
-                    crc ^= 0x8C; // Using the bit-reversed polynomial.
-                }
+//                 // If the XOR of LSBs was 1, XOR crc with the polynomial.
+//                 if xor_lsbs != 0 {
+//                     crc ^= 0x8C; // Using the bit-reversed polynomial.
+//                 }
 
-                // Shift current_byte right to get the next bit in the next iteration.
-                // This effectively processes the byte LSB-first.
-                current_byte >>= 1;
-            }
-        }
+//                 // Shift current_byte right to get the next bit in the next iteration.
+//                 // This effectively processes the byte LSB-first.
+//                 current_byte >>= 1;
+//             }
+//         }
 
-        if crc != 0 {
-            Err(OneWireBusError::ChecksumFailed)
-        } else {
-            Ok(())
-        }
-    }
-}
+//         if crc != 0 {
+//             Err(OneWireBusError::ChecksumFailed)
+//         } else {
+//             Ok(())
+//         }
+//     }
+// }

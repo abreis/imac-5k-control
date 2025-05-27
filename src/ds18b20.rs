@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::onewire::{self, OneWireBus, OneWireBusError};
+use crate::onewire::{OneWireBus, OneWireBusError};
 use embassy_time::Duration;
 
 const FAMILY_CODE: u8 = 0x28;
@@ -31,7 +31,7 @@ impl Ds18b20 {
         self.bus.match_address(self.address);
         self.bus.write_byte(command::READ_SCRATCHPAD);
         self.bus.read_bytes(&mut scratchpad);
-        onewire::crc::check_crc8(&scratchpad)?;
+        OneWireBus::check_crc8(&scratchpad)?;
         Ok(scratchpad)
     }
 

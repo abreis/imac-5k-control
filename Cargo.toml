@@ -15,6 +15,7 @@ bench = false
 [dependencies]
 anyhow = { version = "1.0.98", default-features = false }
 const_format = { version = "0.2.34", features = ["fmt", "rust_1_83"] }
+crc = "3.3.0"
 critical-section = "1.2.0"
 embassy-executor = { version = "0.7.0", features = ["task-arena-size-32768"] }
 embassy-futures = "0.1.1"
