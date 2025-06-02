@@ -5,7 +5,10 @@ use super::{
 use crate::{
     memlog::{self, SharedLogger},
     state::SharedState,
-    task::pin_control::{OnOff, PinControlMessage},
+    task::{
+        net_monitor::NetStatusDynReceiver,
+        pin_control::{OnOff, PinControlMessage},
+    },
 };
 use alloc::{format, string::String};
 use embassy_futures::select;
@@ -42,6 +45,7 @@ pub async fn serial_console(
     pin_uart_tx: gpio::AnyPin,
     pincontrol_channel: PinControlChannel,
     fanduty_signal: FanDutySignal,
+    mut netstatus_receiver: NetStatusDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
     state: SharedState,
     memlog: SharedLogger,
@@ -77,6 +81,7 @@ pub async fn serial_console(
                     &mut uart,
                     pincontrol_channel,
                     fanduty_signal,
+                    &mut netstatus_receiver,
                     &mut tempsensor_receiver,
                     state,
                     memlog,
@@ -103,6 +108,7 @@ async fn cli_parser(
     uart: &mut uart::Uart<'static, Async>,
     pincontrol_channel: PinControlChannel,
     fanduty_signal: FanDutySignal,
+    netstatus_receiver: &mut NetStatusDynReceiver,
     tempsensor_receiver: &mut TempSensorDynReceiver,
     state: SharedState,
     memlog: SharedLogger,
@@ -128,6 +134,9 @@ async fn cli_parser(
              temp\r\n\
              · read\r\n\
              · watch\r\n\
+             net\r\n\
+             · read\r\n\
+             · watch\r\n\
              state\r\n\
              · read\r\n\
              log\r\n\
@@ -136,6 +145,7 @@ async fn cli_parser(
              help"
         }
 
+        //
         // Trigger display controller buttons.
         (Some("button"), Some("power")) => {
             pincontrol_channel
@@ -164,6 +174,7 @@ async fn cli_parser(
         (Some("button"), Some(_)) => "Invalid subcommand for 'button'",
         (Some("button"), None) => "Subcommand required for 'button'",
 
+        //
         // Control 24V power to display.
         (Some("power"), Some("display")) => match chunks.next() {
             Some("on") => {
@@ -200,6 +211,7 @@ async fn cli_parser(
         (Some("power"), Some(_)) => "Invalid subcommand for 'power'",
         (Some("power"), None) => "Subcommand required for 'power'",
 
+        //
         // Fan controls, duty cycle and tachometer.
         (Some("fan"), Some("pwm")) => match chunks.next() {
             Some(pwm_value) => match pwm_value.parse::<u8>() {
@@ -219,6 +231,38 @@ async fn cli_parser(
         (Some("fan"), Some(_)) => "Invalid subcommand for 'fan'",
         (Some("fan"), None) => "Subcommand required for 'fan'",
 
+        //
+        // Network status.
+        (Some("net"), Some("read")) => {
+            let net_status = netstatus_receiver.try_get();
+            &format!("{:?}", net_status)
+        }
+        (Some("net"), Some("watch")) => {
+            let mut buf = [0u8; 1];
+            'watch_loop: loop {
+                let wait_for_status = netstatus_receiver.changed();
+                let wait_for_input = uart.read_async(&mut buf);
+                match select::select(wait_for_status, wait_for_input).await {
+                    select::Either::First(status_result) => {
+                        let formatted = format!("{:?}\r\n", status_result);
+                        uart.write_all_async(formatted.as_bytes()).await?;
+                    }
+                    select::Either::Second(bytes_read) => {
+                        // Accept a Ctrl-C or Ctrl-D to interrupt (ASCII End of Text, End of Transmission)
+                        if let Ok(1) = bytes_read {
+                            if (buf[0] == 0x03) | (buf[0] == 0x04) {
+                                break 'watch_loop;
+                            }
+                        }
+                    }
+                };
+            }
+            ""
+        }
+        (Some("net"), Some(_)) => "Invalid subcommand for 'net'",
+        (Some("net"), None) => "Subcommand required for 'net'",
+
+        //
         // Log control.
         (Some("log"), Some("read")) => {
             //
@@ -239,6 +283,7 @@ async fn cli_parser(
         (Some("log"), Some(_)) => "Invalid subcommand for 'log'",
         (Some("log"), None) => "Subcommand required for 'log'",
 
+        //
         // Temp sensor.
         (Some("temp"), Some("read")) => {
             let sensor_result = tempsensor_receiver.get().await;
@@ -270,11 +315,14 @@ async fn cli_parser(
         (Some("temp"), Some(_)) => "Invalid subcommand for 'temp'",
         (Some("temp"), None) => "Subcommand required for 'temp'",
 
+        //
         // Display state.
         (Some("state"), Some("read")) => &format!("Display state: {:?}", state.get()),
         (Some("state"), Some(_)) => "Invalid subcommand for 'state'",
         (Some("state"), None) => "Subcommand required for 'state'",
 
+        //
+        //
         (None, None) => "Please enter a command",
         _ => "Unrecognized command",
     };

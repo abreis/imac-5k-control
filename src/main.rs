@@ -1,11 +1,6 @@
 #![no_std]
 #![no_main]
-// #![allow(unused_imports)]
-// #![allow(dead_code)]
-// #![allow(unused_variables)]
-// #![allow(unreachable_code)]
-// #![allow(unused_must_use)]
-// #![allow(unused_mut)]
+#![feature(impl_trait_in_assoc_type)]
 
 extern crate alloc;
 
@@ -16,29 +11,26 @@ mod power;
 mod state;
 mod task;
 
-use core::result::Result;
 use embassy_executor::{SpawnError, Spawner};
-use embassy_time::Duration;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
+use esp_hal::gpio;
 use esp_hal::timer::systimer::SystemTimer;
-use esp_hal::{gpio, tsens};
-use esp_println::println;
+use esp_hal::timer::timg::TimerGroup;
 
 // NOTES
-// - esp_println sends prints to 'jtag-serial' via the USB port (set in Cargo.toml)
-//
-// TODO
-// - we can probably run at a lower clock speed (runs less hot)
-
-const DSPL_TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
-// const PSU_TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
+// - esp_println sends prints to 'jtag-serial' via the USB port
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     // let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
     let peripherals = esp_hal::init(esp_config);
+    esp_alloc::heap_allocator!(size: 72 * 1024);
+    let timer0 = SystemTimer::new(peripherals.SYSTIMER);
+    esp_hal_embassy::init(timer0.alarm0);
+    let rng = esp_hal::rng::Rng::new(peripherals.RNG);
+    let timer1 = TimerGroup::new(peripherals.TIMG0);
 
     //
     // C6-SuperMini pinout
@@ -82,16 +74,18 @@ async fn main(spawner: Spawner) {
     let _pin_display_led_red = gpio::Input::new(peripherals.GPIO21, gpio::InputConfig::default());
     let _pin_display_led_green = gpio::Input::new(peripherals.GPIO22, gpio::InputConfig::default());
 
-    //
-    // Resume initialization.
-    esp_alloc::heap_allocator!(size: 72 * 1024);
-    let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-    esp_hal_embassy::init(timer0.alarm0);
-    println!("imac5k display controller initialized");
-
     // Initialize an in-memory logger with space for 480 characters.
     let memlog = memlog::init(480);
     memlog.info("imac5k display controller initialized");
+
+    // Set up the WiFi.
+    let (wifi_controller, wifi_interfaces) =
+        task::wifi::init(timer1.timer0, peripherals.RADIO_CLK, peripherals.WIFI, rng)
+            .await
+            .unwrap();
+
+    // Set up the network stack.
+    let (net_stack, net_runner) = task::net::init(wifi_interfaces.sta, rng).await;
 
     // A shared state for the display.
     let state = state::SharedState::new_standby();
@@ -102,16 +96,35 @@ async fn main(spawner: Spawner) {
     // Get a shareable channel to send messages to the pincontrol task.
     let pincontrol_channel = task::pin_control::init();
 
-    // Get a watcher to await changes in temperature sensor readings.
-    let tempsensor_watch = task::temp_sensor::init();
+    //
+    // Watcher count: 1 for serial console, 2 for httpd workers
 
-    // Set up the internal temperature sensor.
-    let _onboard_sensor =
-        tsens::TemperatureSensor::new(peripherals.TSENS, tsens::Config::default()).unwrap();
+    // Get a watcher to await changes in temperature sensor readings.
+    let tempsensor_watch = task::temp_sensor::init::<4>();
+
+    // Get a watcher to monitor the network interface.
+    let netstatus_watch = task::net_monitor::init::<4>();
+
+    // // Set up the internal temperature sensor.
+    // let _onboard_sensor =
+    //     tsens::TemperatureSensor::new(peripherals.TSENS, tsens::Config::default()).unwrap();
 
     //
     // Spawn tasks.
     || -> Result<(), SpawnError> {
+        // Keep the wifi connected.
+        spawner.spawn(task::wifi::wifi_permanent_connection(
+            wifi_controller,
+            memlog,
+        ))?;
+
+        // Run the network stack.
+        spawner.spawn(task::net::stack_runner(net_runner))?;
+
+        // Monitor the network stack for changes.
+        spawner.spawn(task::net_monitor(net_stack, netstatus_watch.dyn_sender()))?;
+
+        // Control the buttons on the display board.
         spawner.spawn(task::pin_control(
             pin_button_power,
             pin_button_menu,
@@ -122,16 +135,21 @@ async fn main(spawner: Spawner) {
             pin_power_fan,
             pincontrol_channel,
         ))?;
+
+        // Launch a control interface on UART0.
         spawner.spawn(task::serial_console(
             peripherals.UART0.into(),
             pin_uart_rx.into(),
             pin_uart_tx.into(),
             pincontrol_channel,
             fanduty_signal,
+            netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             state,
             memlog,
         ))?;
+
+        // Watch the case button for presses.
         spawner.spawn(task::case_button(
             state,
             pin_button_case.into(),
@@ -139,15 +157,13 @@ async fn main(spawner: Spawner) {
             memlog,
         ))?;
 
+        // Control the case fan duty cycle.
         spawner.spawn(task::fan_duty(pwm_channel, fanduty_signal))?;
 
-        // Take a temperature measurement every 10 seconds.
-        const TEMP_MEASUREMENT_INTERVAL: Duration = Duration::from_secs(10);
+        // Take a temperature measurement periodically.
         spawner.spawn(task::temp_sensor(
             pin_sensor_display_temp.into(),
-            DSPL_TEMP_SENSOR_ADDRESS,
             tempsensor_watch.dyn_sender(),
-            TEMP_MEASUREMENT_INTERVAL,
         ))?;
 
         // Keep adjusting the fan duty based on the temperature measurements.
@@ -155,6 +171,18 @@ async fn main(spawner: Spawner) {
             fanduty_signal,
             tempsensor_watch.dyn_receiver().unwrap(),
         ))?;
+
+        // Launch httpd workers.
+        task::httpd::launch_workers(
+            spawner,
+            net_stack,
+            pincontrol_channel,
+            fanduty_signal,
+            netstatus_watch.dyn_receiver().unwrap(),
+            tempsensor_watch.dyn_receiver().unwrap(),
+            state,
+            memlog,
+        )?;
 
         Ok(())
     }()

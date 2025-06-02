@@ -8,31 +8,28 @@ use embassy_time::{Duration, Timer};
 use embedded_hal::digital::{InputPin, OutputPin};
 use esp_hal::gpio;
 
-const TEMPSENSOR_MAX_RECEIVERS: usize = 2;
-
-pub type TempSensorWatch =
-    &'static watch::Watch<NoopRawMutex, TempSensorReading, TEMPSENSOR_MAX_RECEIVERS>;
+pub type TempSensorWatch<const W: usize> =
+    &'static watch::Watch<NoopRawMutex, TempSensorReading, W>;
 pub type TempSensorDynSender = watch::DynSender<'static, TempSensorReading>;
 pub type TempSensorDynReceiver = watch::DynReceiver<'static, TempSensorReading>;
 
 pub type TempSensorReading = Result<SensorData, DS18B20Error>;
 
-pub fn init() -> TempSensorWatch {
+pub fn init<const WATCHERS: usize>() -> TempSensorWatch<WATCHERS> {
     Box::leak(Box::new(watch::Watch::new()))
 }
 
+const DSPL_TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
+// const PSU_TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
+const TEMP_MEASUREMENT_INTERVAL: Duration = Duration::from_secs(10);
+
 #[embassy_executor::task]
-pub async fn temp_sensor(
-    onewire_pin: gpio::AnyPin,
-    sensor_address: u64,
-    tempsensor_sender: TempSensorDynSender,
-    loop_interval: Duration,
-) {
+pub async fn temp_sensor(onewire_pin: gpio::AnyPin, tempsensor_sender: TempSensorDynSender) {
     let onewire_bus = OneWireBus::new(onewire_pin);
-    let mut sensor = Ds18b20::new(sensor_address, onewire_bus).unwrap();
+    let mut sensor = Ds18b20::new(DSPL_TEMP_SENSOR_ADDRESS, onewire_bus).unwrap();
 
     loop {
-        Timer::after(loop_interval).await;
+        Timer::after(TEMP_MEASUREMENT_INTERVAL).await;
 
         // Attempt to catch errors from 1Wire.
         let sensor_reading: Result<SensorData, DS18B20Error> = async {

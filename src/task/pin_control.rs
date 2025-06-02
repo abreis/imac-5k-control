@@ -8,8 +8,9 @@ use crate::memlog::SharedLogger;
 
 // How long to toggle button control pins for.
 const BUTTON_DELAY_MS: Duration = Duration::from_millis(100);
-
+//
 const CHANNEL_BACKLOG: usize = 5;
+
 pub type PinControlChannel =
     &'static channel::Channel<NoopRawMutex, PinControlMessage, CHANNEL_BACKLOG>;
 
