@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments)]
 use alloc::boxed::Box;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel};
 use embassy_time::{Duration, Timer};

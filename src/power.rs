@@ -25,13 +25,13 @@ pub async fn power_on(
         }
     }
 
-    state.to_powering_on()?;
+    state.set_powering_on()?;
     pincontrol_channel
         .send(PinControlMessage::DisplayPower(OnOff::On))
         .await;
     Timer::after(POWER_ON_PAUSE).await;
 
-    state.to_display_on()?;
+    state.set_display_on()?;
     pincontrol_channel
         .send(PinControlMessage::ButtonPower)
         .await;
@@ -52,13 +52,13 @@ pub async fn power_off(
         }
     }
 
-    state.to_powering_off()?;
+    state.set_powering_off()?;
     pincontrol_channel
         .send(PinControlMessage::ButtonPower)
         .await;
     Timer::after(BUTTON_OFF_PAUSE).await;
 
-    state.to_standby()?;
+    state.set_standby()?;
     pincontrol_channel
         .send(PinControlMessage::DisplayPower(OnOff::Off))
         .await;

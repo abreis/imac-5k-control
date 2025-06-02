@@ -35,7 +35,7 @@ pub async fn temp_sensor(
         Timer::after(loop_interval).await;
 
         // Attempt to catch errors from 1Wire.
-        let sensor_reading = async || -> Result<SensorData, DS18B20Error> {
+        let sensor_reading: Result<SensorData, DS18B20Error> = async {
             // Begin a measurement and wait for it to complete.
             sensor.start_temp_measurement()?;
 
@@ -46,7 +46,7 @@ pub async fn temp_sensor(
             let data = sensor.read_sensor_data()?;
 
             Ok(data)
-        }()
+        }
         .await;
 
         tempsensor_sender.send(sensor_reading);

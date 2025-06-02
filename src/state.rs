@@ -38,19 +38,19 @@ impl SharedState {
             ))
         }
     }
-    pub fn to_standby(&self) -> Result<()> {
+    pub fn set_standby(&self) -> Result<()> {
         self.try_transition(State::PoweringOff, State::Standby)
     }
 
-    pub fn to_powering_on(&self) -> Result<()> {
+    pub fn set_powering_on(&self) -> Result<()> {
         self.try_transition(State::Standby, State::PoweringOn)
     }
 
-    pub fn to_display_on(&self) -> Result<()> {
+    pub fn set_display_on(&self) -> Result<()> {
         self.try_transition(State::PoweringOn, State::DisplayOn)
     }
 
-    pub fn to_powering_off(&self) -> Result<()> {
+    pub fn set_powering_off(&self) -> Result<()> {
         self.try_transition(State::DisplayOn, State::PoweringOff)
     }
 
