@@ -120,7 +120,7 @@ impl AppBuilder for AppProps {
                 get(|| async {
                     "GET /button/power\n\
                      GET /button/menu\n\
-                     GET /button/enter\n\
+                     GET /button/back\n\
                      GET /button/down\n\
                      GET /button/up\n\
                      GET /power/display/{on,off}\n\
@@ -156,13 +156,13 @@ impl AppBuilder for AppProps {
                 }),
             )
             .route(
-                "/button/enter",
+                "/button/back",
                 get(|| async {
                     app.borrow()
                         .pincontrol_channel
-                        .send(PinControlMessage::ButtonEnter)
+                        .send(PinControlMessage::ButtonBack)
                         .await;
-                    "Triggered button 'enter'\n"
+                    "Triggered button 'back'\n"
                 }),
             )
             .route(

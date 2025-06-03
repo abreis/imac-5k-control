@@ -16,7 +16,7 @@ let pin_uart_tx = peripherals.GPIO21;
 let pin_button_power = gpio::Output::new(peripherals.GPIO5, gpio::Level::Low, output_5ma);
 // G6, G7, G8, G10 trigger controller buttons on level:low (via SPST switches).
 let pin_button_menu = gpio::Output::new(peripherals.GPIO6, gpio::Level::High, output_5ma);
-let pin_button_enter = gpio::Output::new(peripherals.GPIO7, gpio::Level::High, output_5ma);
+let pin_button_back = gpio::Output::new(peripherals.GPIO7, gpio::Level::High, output_5ma);
 let pin_button_down = gpio::Output::new(peripherals.GPIO8, gpio::Level::High, output_5ma);
 let pin_button_up = gpio::Output::new(peripherals.GPIO10, gpio::Level::High, output_5ma);
 // G4 reads the case button, which pulls the line to GND when pressed.
@@ -60,7 +60,7 @@ let pin_uart_rx = peripherals.GPIO17;
 let pin_button_power = gpio::Output::new(peripherals.GPIO1, gpio::Level::Low, output_5ma);
 // G5, G4, G3, G2 trigger controller buttons on level:low (via SPST switches).
 let pin_button_menu = gpio::Output::new(peripherals.GPIO5, gpio::Level::High, output_5ma);
-let pin_button_enter = gpio::Output::new(peripherals.GPIO4, gpio::Level::High, output_5ma);
+let pin_button_back = gpio::Output::new(peripherals.GPIO4, gpio::Level::High, output_5ma);
 let pin_button_down = gpio::Output::new(peripherals.GPIO3, gpio::Level::High, output_5ma);
 let pin_button_up = gpio::Output::new(peripherals.GPIO2, gpio::Level::High, output_5ma);
 // G0 reads the case button, which pulls the line to GND when pressed.

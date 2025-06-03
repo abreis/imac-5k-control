@@ -122,7 +122,7 @@ async fn cli_parser(
             "button\r\n\
              · power\r\n\
              · menu\r\n\
-             · enter\r\n\
+             · back\r\n\
              · down\r\n\
              · up\r\n\
              power\r\n\
@@ -157,11 +157,9 @@ async fn cli_parser(
             pincontrol_channel.send(PinControlMessage::ButtonMenu).await;
             "Triggered button 'menu'"
         }
-        (Some("button"), Some("enter")) => {
-            pincontrol_channel
-                .send(PinControlMessage::ButtonEnter)
-                .await;
-            "Triggered button 'enter'"
+        (Some("button"), Some("back")) => {
+            pincontrol_channel.send(PinControlMessage::ButtonBack).await;
+            "Triggered button 'back'"
         }
         (Some("button"), Some("down")) => {
             pincontrol_channel.send(PinControlMessage::ButtonDown).await;

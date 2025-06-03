@@ -54,7 +54,7 @@ async fn main(spawner: Spawner) {
     let pin_button_power = gpio::Output::new(peripherals.GPIO1, gpio::Level::Low, output_5ma);
     // G5, G4, G3, G2 trigger controller buttons on level:low (via SPST switches).
     let pin_button_menu = gpio::Output::new(peripherals.GPIO5, gpio::Level::High, output_5ma);
-    let pin_button_enter = gpio::Output::new(peripherals.GPIO4, gpio::Level::High, output_5ma);
+    let pin_button_back = gpio::Output::new(peripherals.GPIO4, gpio::Level::High, output_5ma);
     let pin_button_down = gpio::Output::new(peripherals.GPIO3, gpio::Level::High, output_5ma);
     let pin_button_up = gpio::Output::new(peripherals.GPIO2, gpio::Level::High, output_5ma);
     // G0 reads the case button, which pulls the line to GND when pressed.
@@ -128,7 +128,7 @@ async fn main(spawner: Spawner) {
         spawner.spawn(task::pin_control(
             pin_button_power,
             pin_button_menu,
-            pin_button_enter,
+            pin_button_back,
             pin_button_down,
             pin_button_up,
             pin_power_display,
