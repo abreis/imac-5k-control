@@ -12,8 +12,8 @@ use alloc::{
     format,
     string::{String, ToString},
 };
-use core::cell::RefCell;
 use embassy_executor::{SpawnError, Spawner};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::Duration;
 use picoserve::{
     AppBuilder, AppRouter, Config, Timeouts,
@@ -110,7 +110,7 @@ impl AppBuilder for AppProps {
     type PathRouter = impl picoserve::routing::PathRouter;
 
     fn build_app(self) -> picoserve::Router<Self::PathRouter> {
-        let app: &'static RefCell<AppProps> = Box::leak(Box::new(RefCell::new(self)));
+        let app: &'static Mutex<NoopRawMutex, AppProps> = Box::leak(Box::new(Mutex::new(self)));
 
         picoserve::Router::new()
             .route("/", get(|| async { HTTPD_MOTD }))
@@ -133,11 +133,11 @@ impl AppBuilder for AppProps {
                      GET /help\n"
                 }),
             )
-            // Button routes
             .route(
                 "/button/power",
                 get(|| async {
-                    app.borrow()
+                    app.lock()
+                        .await
                         .pincontrol_channel
                         .send(PinControlMessage::ButtonPower)
                         .await;
@@ -147,7 +147,8 @@ impl AppBuilder for AppProps {
             .route(
                 "/button/menu",
                 get(|| async {
-                    app.borrow()
+                    app.lock()
+                        .await
                         .pincontrol_channel
                         .send(PinControlMessage::ButtonMenu)
                         .await;
@@ -157,7 +158,8 @@ impl AppBuilder for AppProps {
             .route(
                 "/button/back",
                 get(|| async {
-                    app.borrow()
+                    app.lock()
+                        .await
                         .pincontrol_channel
                         .send(PinControlMessage::ButtonBack)
                         .await;
@@ -167,7 +169,8 @@ impl AppBuilder for AppProps {
             .route(
                 "/button/down",
                 get(|| async {
-                    app.borrow()
+                    app.lock()
+                        .await
                         .pincontrol_channel
                         .send(PinControlMessage::ButtonDown)
                         .await;
@@ -177,27 +180,29 @@ impl AppBuilder for AppProps {
             .route(
                 "/button/up",
                 get(|| async {
-                    app.borrow()
+                    app.lock()
+                        .await
                         .pincontrol_channel
                         .send(PinControlMessage::ButtonUp)
                         .await;
                     "Triggered button 'up'\n"
                 }),
             )
-            // Power routes
             .route(
                 ("/power/display", parse_path_segment()),
                 get(move |action: String| async move {
                     match action.as_str() {
                         "on" => {
-                            app.borrow()
+                            app.lock()
+                                .await
                                 .pincontrol_channel
                                 .send(PinControlMessage::DisplayPower(OnOff::On))
                                 .await;
                             "Display power turned on\n"
                         }
                         "off" => {
-                            app.borrow()
+                            app.lock()
+                                .await
                                 .pincontrol_channel
                                 .send(PinControlMessage::DisplayPower(OnOff::Off))
                                 .await;
@@ -212,14 +217,16 @@ impl AppBuilder for AppProps {
                 get(move |action: String| async move {
                     match action.as_str() {
                         "on" => {
-                            app.borrow()
+                            app.lock()
+                                .await
                                 .pincontrol_channel
                                 .send(PinControlMessage::FanPower(OnOff::On))
                                 .await;
                             "Fan power turned on\n"
                         }
                         "off" => {
-                            app.borrow()
+                            app.lock()
+                                .await
                                 .pincontrol_channel
                                 .send(PinControlMessage::FanPower(OnOff::Off))
                                 .await;
@@ -229,41 +236,40 @@ impl AppBuilder for AppProps {
                     }
                 }),
             )
-            // Fan PWM route
             .route(
                 ("/fan/pwm", parse_path_segment()),
                 get(move |duty: u8| async move {
                     if (0u8..=100).contains(&duty) {
-                        app.borrow_mut().fanduty_signal.signal(duty);
+                        app.lock().await.fanduty_signal.signal(duty);
                         format!("Fan duty set to {duty}\n")
                     } else {
                         "Fan duty value must be between 0 and 100\n".to_string()
                     }
                 }),
             )
-            // State route
             .route(
                 "/state",
-                get(|| async { format!("{:#?}\n", app.borrow().state.get()) }),
+                get(|| async { format!("{:#?}\n", app.lock().await.state.get()) }),
             )
             .route(
                 "/temp",
                 get(|| async {
-                    let value = app.borrow_mut().tempsensor_receiver.try_get();
+                    let value = app.lock().await.tempsensor_receiver.try_get();
                     format!("{:#?}\n", value)
                 }),
             )
             .route(
                 "/net",
                 get(|| async {
-                    let value = app.borrow_mut().netstatus_receiver.try_get();
+                    let value = app.lock().await.netstatus_receiver.try_get();
                     format!("{:#?}\n", value)
                 }),
             )
             .route(
                 "/log",
                 get(|| async {
-                    app.borrow()
+                    app.lock()
+                        .await
                         .memlog
                         .records()
                         .iter()
@@ -279,7 +285,7 @@ impl AppBuilder for AppProps {
             .route(
                 "/log/clear",
                 get(|| async {
-                    app.borrow().memlog.clear();
+                    app.lock().await.memlog.clear();
                     "Logs cleared\n"
                 }),
             )
