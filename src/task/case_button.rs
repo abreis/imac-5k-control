@@ -1,6 +1,6 @@
 use super::pin_control::PinControlChannel;
 use crate::{
-    memlog::{self, SharedLogger},
+    memlog::SharedLogger,
     power,
     state::{SharedState, State},
 };
@@ -13,7 +13,7 @@ const BUTTON_HELD_DURATION_MAX: Duration = Duration::from_millis(2000);
 #[embassy_executor::task]
 pub async fn case_button(
     state: SharedState,
-    pin: gpio::AnyPin,
+    pin: gpio::AnyPin<'static>,
     pincontrol_channel: PinControlChannel,
     memlog: SharedLogger,
 ) {

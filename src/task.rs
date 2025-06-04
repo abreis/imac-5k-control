@@ -1,5 +1,3 @@
-#![allow(unused_imports)]
-
 pub mod case_button;
 pub mod fan_duty;
 pub mod httpd;

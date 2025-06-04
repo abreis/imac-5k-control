@@ -2,10 +2,9 @@ use crate::{
     ds18b20::{DS18B20Error, Ds18b20, Resolution, SensorData},
     onewire::OneWireBus,
 };
-use alloc::{boxed::Box, format, string::String};
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, pubsub, signal, watch};
+use alloc::boxed::Box;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 use embassy_time::{Duration, Timer};
-use embedded_hal::digital::{InputPin, OutputPin};
 use esp_hal::gpio;
 
 pub type TempSensorWatch<const W: usize> =
@@ -24,7 +23,10 @@ const DSPL_TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
 const TEMP_MEASUREMENT_INTERVAL: Duration = Duration::from_secs(10);
 
 #[embassy_executor::task]
-pub async fn temp_sensor(onewire_pin: gpio::AnyPin, tempsensor_sender: TempSensorDynSender) {
+pub async fn temp_sensor(
+    onewire_pin: gpio::AnyPin<'static>,
+    tempsensor_sender: TempSensorDynSender,
+) {
     let onewire_bus = OneWireBus::new(onewire_pin);
     let mut sensor = Ds18b20::new(DSPL_TEMP_SENSOR_ADDRESS, onewire_bus).unwrap();
 

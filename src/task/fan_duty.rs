@@ -4,7 +4,6 @@ use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal};
 use esp_hal::{
     gpio,
     ledc::{self, LowSpeed, channel::ChannelIFace, timer::TimerIFace},
-    peripheral::Peripheral,
     peripherals::LEDC,
     time,
 };
@@ -15,7 +14,7 @@ pub type FanDutySignal = &'static signal::Signal<NoopRawMutex, u8>;
 /// Initializes the fan PWM controller to be passed to the fan_duty task.
 #[must_use]
 pub fn init(
-    peripheral: impl Peripheral<P = LEDC> + 'static,
+    peripheral: LEDC<'static>,
     pin_fan_pwm: gpio::Output<'static>,
 ) -> (ledc::channel::Channel<'static, LowSpeed>, FanDutySignal) {
     // LED Controller (LEDC) PWM setup.

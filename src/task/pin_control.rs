@@ -4,8 +4,6 @@ use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel};
 use embassy_time::{Duration, Timer};
 use esp_hal::gpio;
 
-use crate::memlog::SharedLogger;
-
 // How long to toggle button control pins for.
 const BUTTON_DELAY_MS: Duration = Duration::from_millis(100);
 //
