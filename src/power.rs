@@ -6,10 +6,11 @@ use crate::{
 use anyhow::bail;
 use embassy_time::{Duration, Timer};
 
-// TODO: how long to wait after 24v power is on?
-const POWER_ON_PAUSE: Duration = Duration::from_millis(2500);
-// TODO: how long to wait after clicking power button?
-const BUTTON_OFF_PAUSE: Duration = Duration::from_millis(2500);
+// Measured ~3.5s from the time power is applied until controller settles.
+// By settling, we mean its power draw stabilizing (at 0.04 watts).
+const POWER_ON_PAUSE: Duration = Duration::from_millis(3500 + 500);
+// Measured ~3s from the time the power button is pressed (to OFF) until the controller stops drawing power.
+const BUTTON_OFF_PAUSE: Duration = Duration::from_millis(3000 + 500);
 
 pub async fn power_on(
     state: SharedState,
