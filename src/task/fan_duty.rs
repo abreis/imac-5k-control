@@ -65,9 +65,9 @@ pub async fn fan_temp_control(
 ) {
     let mut last_temp = 0f32;
     loop {
-        if let Ok(sensor_data) = tempsensor_receiver.changed().await {
-            if sensor_data.temperature != last_temp {
-                last_temp = sensor_data.temperature;
+        if let Ok(sensor_temp) = tempsensor_receiver.changed().await.temperature {
+            if sensor_temp != last_temp {
+                last_temp = sensor_temp;
 
                 // Apply curve, temperature-to-duty.
                 // TODO: run the display for some time and note temperature ranges at multiply fan duties.

@@ -75,7 +75,7 @@ pub enum Resolution {
 }
 
 impl Resolution {
-    pub fn max_measurement_time(&self) -> Duration {
+    pub const fn max_measurement_time(&self) -> Duration {
         match self {
             Resolution::Bits9 => Duration::from_millis(94),
             Resolution::Bits10 => Duration::from_millis(188),
