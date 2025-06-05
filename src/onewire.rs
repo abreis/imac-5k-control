@@ -60,6 +60,7 @@ impl OneWireBus {
         );
         pin.set_output_enable(true);
         pin.set_input_enable(true);
+        pin.set_high();
 
         Self {
             pin,
@@ -175,6 +176,9 @@ impl OneWireBus {
         // These are minimum times: we add a 5% margin.
         const RESET_TIME_HIGH: u32 = 480 + 24;
         const RESET_TIME_LOW: u64 = 480 + 24;
+
+        // Release the bus prior to a reset (pin is open-drain).
+        self.pin.set_high();
 
         self.wait_for_high()?;
         // Master pulls the line LOW for 480µs, then releases it.
