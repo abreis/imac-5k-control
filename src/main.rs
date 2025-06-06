@@ -4,9 +4,7 @@
 
 extern crate alloc;
 
-mod ds18b20;
 mod memlog;
-mod onewire;
 mod power;
 mod state;
 mod task;
