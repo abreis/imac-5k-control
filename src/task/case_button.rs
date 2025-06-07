@@ -3,18 +3,20 @@ use crate::{
     memlog::SharedLogger,
     power,
     state::{SharedState, State},
+    task::buzzer::BuzzerChannel,
 };
 use embassy_time::Duration;
 use esp_hal::gpio;
 
 const BUTTON_HELD_DURATION_MIN: Duration = Duration::from_millis(500);
-const BUTTON_HELD_DURATION_MAX: Duration = Duration::from_millis(2000);
+const BUTTON_HELD_DURATION_MAX: Duration = Duration::from_millis(1500);
 
 #[embassy_executor::task]
 pub async fn case_button(
     state: SharedState,
     pin: gpio::AnyPin<'static>,
     pincontrol_channel: PinControlChannel,
+    buzzer_channel: BuzzerChannel,
     memlog: SharedLogger,
 ) {
     // Initialize the pin with a pull-up. The button is wired to GND.
@@ -36,12 +38,16 @@ pub async fn case_button(
             memlog.debug("case button triggered");
 
             match state.get() {
-                State::Standby => power::power_on(state, pincontrol_channel, memlog)
-                    .await
-                    .unwrap(),
-                State::DisplayOn => power::power_off(state, pincontrol_channel, memlog)
-                    .await
-                    .unwrap(),
+                State::Standby => {
+                    power::power_on(state, pincontrol_channel, buzzer_channel, memlog)
+                        .await
+                        .unwrap()
+                }
+                State::DisplayOn => {
+                    power::power_off(state, pincontrol_channel, buzzer_channel, memlog)
+                        .await
+                        .unwrap()
+                }
                 _invalid_state => {
                     memlog.warn("case button pressed while in invalid state, ignored")
                 }

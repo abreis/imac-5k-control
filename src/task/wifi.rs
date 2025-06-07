@@ -44,7 +44,7 @@ pub async fn init(
 }
 
 #[embassy_executor::task]
-pub async fn wifi_permanent_connection(
+pub async fn permanent_connection(
     mut controller: wifi::WifiController<'static>,
     memlog: SharedLogger,
 ) {

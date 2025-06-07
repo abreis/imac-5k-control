@@ -1,3 +1,4 @@
+pub mod buzzer;
 pub mod case_button;
 pub mod fan_duty;
 pub mod httpd;
@@ -8,6 +9,7 @@ pub mod serial_console;
 pub mod temp_sensor;
 pub mod wifi;
 
+pub use buzzer::buzzer_control;
 pub use case_button::case_button;
 pub use fan_duty::fan_duty;
 pub use fan_duty::fan_temp_control;

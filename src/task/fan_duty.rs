@@ -1,4 +1,5 @@
 use super::temp_sensor::TempSensorDynReceiver;
+use crate::task::fan_duty::fan_pid::FanPidController;
 use alloc::boxed::Box;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal};
 use esp_hal::{
@@ -60,21 +61,66 @@ pub async fn fan_duty(
 /// Sets the fan duty based on the sensed temperature.
 #[embassy_executor::task]
 pub async fn fan_temp_control(
-    _fanduty_signal: FanDutySignal,
+    fanduty_signal: FanDutySignal,
     mut tempsensor_receiver: TempSensorDynReceiver,
 ) {
-    let mut last_temp = 0f32;
+    let mut pid_controller = FanPidController::new();
+
     loop {
         if let Ok(sensor_temp) = tempsensor_receiver.changed().await.temperature {
-            if sensor_temp != last_temp {
-                last_temp = sensor_temp;
+            let new_duty_cycle = pid_controller.update(sensor_temp);
+            let new_duty_cycle = libm::roundf(new_duty_cycle) as u8;
+            fanduty_signal.signal(new_duty_cycle);
+        }
+    }
+}
 
-                // Apply curve, temperature-to-duty.
-                // TODO: run the display for some time and note temperature ranges at multiply fan duties.
-                let _new_fan_duty = 100;
+mod fan_pid {
+    // Default target temperature.
+    const SETPOINT_TEMP_C: f32 = 70.0;
 
-                // fanduty_signal.signal(new_fan_duty);
-            }
+    // PID output is mapped to [-PID_SYMMETRIC_LIMIT, +PID_SYMMETRIC_LIMIT].
+    // Actual fan duty cycle will be pid_output + FAN_DUTY_OFFSET.
+    const PID_SYMMETRIC_LIMIT: f32 = 50.0;
+    const FAN_DUTY_OFFSET: f32 = 50.0;
+
+    // Controller gains.
+    //
+    // Goal: ensure fan reaches 100% duty at 85ºC.
+    //    temp:  85º
+    //   error: -15º
+    //  p_gain:  15*2 = 30
+    //    duty:  30+50 = 80%
+    // Integral component takes the fan to the remaining 20%.
+    const KP_GAIN: f32 = -2.0;
+    const KI_GAIN: f32 = -0.2;
+
+    // Limits for individual term contributions to the PID output.
+    const P_TERM_CONTRIBUTION_LIMIT: f32 = 40.0;
+    const I_TERM_CONTRIBUTION_LIMIT: f32 = 40.0;
+
+    pub struct FanPidController(pid::Pid<f32>);
+
+    impl FanPidController {
+        /// Initializes the fan PID controller with pre-defined gains and limits.
+        pub fn new() -> Self {
+            let mut pid_controller = pid::Pid::new(SETPOINT_TEMP_C, PID_SYMMETRIC_LIMIT);
+
+            pid_controller
+                .p(KP_GAIN, P_TERM_CONTRIBUTION_LIMIT)
+                .i(KI_GAIN, I_TERM_CONTRIBUTION_LIMIT);
+            //  .d(KD_PARAM, D_TERM_CONTRIBUTION_LIMIT);
+
+            Self(pid_controller)
+        }
+
+        /// Takes the current temperature measurement and returns the new fan duty cycle.
+        pub fn update(&mut self, current_temp_c: f32) -> f32 {
+            let control_signal = self.0.next_control_output(current_temp_c);
+
+            // Apply offset to map to [0.0, 100.0].
+            // We trust that `output_limit` will have it clamped.
+            control_signal.output + FAN_DUTY_OFFSET
         }
     }
 }

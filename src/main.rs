@@ -40,7 +40,6 @@ async fn main(spawner: Spawner) {
     let _pin9_unused = peripherals.GPIO9;
     let _pin12_unused = peripherals.GPIO12;
     let _pin13_unused = peripherals.GPIO13;
-    let _pin14_unused = peripherals.GPIO14;
     let _pin15_unused = peripherals.GPIO15;
     // let _pin21_unused = peripherals.GPIO21;
     // let _pin22_unused = peripherals.GPIO22;
@@ -71,6 +70,12 @@ async fn main(spawner: Spawner) {
     // G21 and G22 track the status LEDs on the display board.
     let _pin_display_led_red = gpio::Input::new(peripherals.GPIO21, gpio::InputConfig::default());
     let _pin_display_led_green = gpio::Input::new(peripherals.GPIO22, gpio::InputConfig::default());
+    // G14 controls the buzzer.
+    let pin_buzzer = gpio::Output::new(
+        peripherals.GPIO14,
+        gpio::Level::Low,
+        gpio::OutputConfig::default().with_drive_strength(gpio::DriveStrength::_5mA),
+    );
 
     // Initialize an in-memory logger with space for 480 characters.
     let memlog = memlog::init(480);
@@ -94,6 +99,9 @@ async fn main(spawner: Spawner) {
     // Get a shareable channel to send messages to the pincontrol task.
     let pincontrol_channel = task::pin_control::init();
 
+    // Get a shareable channel to send buzzer control messages.
+    let buzzer_channel = task::buzzer::init();
+
     //
     // Watcher count: 1 for serial console, 2 for httpd workers
 
@@ -110,11 +118,11 @@ async fn main(spawner: Spawner) {
     //
     // Spawn tasks.
     || -> Result<(), SpawnError> {
+        // Run the buzzer controller.
+        spawner.spawn(task::buzzer_control(pin_buzzer, buzzer_channel))?;
+
         // Keep the wifi connected.
-        spawner.spawn(task::wifi::wifi_permanent_connection(
-            wifi_controller,
-            memlog,
-        ))?;
+        spawner.spawn(task::wifi::permanent_connection(wifi_controller, memlog))?;
 
         // Run the network stack.
         spawner.spawn(task::net::stack_runner(net_runner))?;
@@ -152,6 +160,7 @@ async fn main(spawner: Spawner) {
             state,
             pin_button_case.into(),
             pincontrol_channel,
+            buzzer_channel,
             memlog,
         ))?;
 
