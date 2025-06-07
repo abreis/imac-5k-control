@@ -1,7 +1,7 @@
 use super::temp_sensor::TempSensorDynReceiver;
 use crate::task::fan_duty::fan_pid::FanPidController;
 use alloc::boxed::Box;
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 use esp_hal::{
     gpio,
     ledc::{self, LowSpeed, channel::ChannelIFace, timer::TimerIFace},
@@ -10,14 +10,19 @@ use esp_hal::{
 };
 
 const INITIAL_FAN_DUTY: u8 = 100;
-pub type FanDutySignal = &'static signal::Signal<NoopRawMutex, u8>;
+pub type FanDutySignal<const W: usize> = &'static watch::Watch<NoopRawMutex, u8, W>;
+pub type FanDutyDynSender = watch::DynSender<'static, u8>;
+pub type FanDutyDynReceiver = watch::DynReceiver<'static, u8>;
 
 /// Initializes the fan PWM controller to be passed to the fan_duty task.
 #[must_use]
-pub fn init(
+pub fn init<const WATCHERS: usize>(
     peripheral: LEDC<'static>,
     pin_fan_pwm: gpio::Output<'static>,
-) -> (ledc::channel::Channel<'static, LowSpeed>, FanDutySignal) {
+) -> (
+    ledc::channel::Channel<'static, LowSpeed>,
+    FanDutySignal<WATCHERS>,
+) {
     // LED Controller (LEDC) PWM setup.
     let mut ledc = ledc::Ledc::new(peripheral);
     ledc.set_global_slow_clock(ledc::LSGlobalClkSource::APBClk);
@@ -42,18 +47,18 @@ pub fn init(
         })
         .unwrap();
 
-    let fanduty_signal = Box::leak(Box::new(signal::Signal::new()));
-    (ledc_channel0, fanduty_signal)
+    let fanduty_watch = Box::leak(Box::new(watch::Watch::new()));
+    (ledc_channel0, fanduty_watch)
 }
 
 #[embassy_executor::task]
 pub async fn fan_duty(
     pwm_channel: ledc::channel::Channel<'static, LowSpeed>,
-    signal: FanDutySignal,
+    mut fanduty_receiver: FanDutyDynReceiver,
 ) {
     loop {
         // Wait for a new duty cycle to be signalled.
-        let new_fan_duty = signal.wait().await;
+        let new_fan_duty = fanduty_receiver.changed().await;
         pwm_channel.set_duty(new_fan_duty).unwrap(); // Does not fail if timer and channel are configured, and duty ∈ [0,100]
     }
 }
@@ -61,7 +66,7 @@ pub async fn fan_duty(
 /// Sets the fan duty based on the sensed temperature.
 #[embassy_executor::task]
 pub async fn fan_temp_control(
-    fanduty_signal: FanDutySignal,
+    fanduty_sender: FanDutyDynSender,
     mut tempsensor_receiver: TempSensorDynReceiver,
 ) {
     let mut pid_controller = FanPidController::new();
@@ -70,7 +75,7 @@ pub async fn fan_temp_control(
         if let Ok(sensor_temp) = tempsensor_receiver.changed().await.temperature {
             let new_duty_cycle = pid_controller.update(sensor_temp);
             let new_duty_cycle = libm::roundf(new_duty_cycle) as u8;
-            fanduty_signal.signal(new_duty_cycle);
+            fanduty_sender.send(new_duty_cycle);
         }
     }
 }

@@ -1,11 +1,10 @@
 #![allow(clippy::too_many_arguments)]
-use super::{
-    fan_duty::FanDutySignal, pin_control::PinControlChannel, temp_sensor::TempSensorDynReceiver,
-};
+use super::{pin_control::PinControlChannel, temp_sensor::TempSensorDynReceiver};
 use crate::{
     memlog::{self, SharedLogger},
     state::SharedState,
     task::{
+        fan_duty::{FanDutyDynReceiver, FanDutyDynSender},
         net_monitor::NetStatusDynReceiver,
         pin_control::{OnOff, PinControlMessage},
     },
@@ -44,7 +43,8 @@ pub async fn serial_console(
     pin_uart_rx: gpio::AnyPin<'static>,
     pin_uart_tx: gpio::AnyPin<'static>,
     pincontrol_channel: PinControlChannel,
-    fanduty_signal: FanDutySignal,
+    fanduty_sender: FanDutyDynSender,
+    mut fanduty_receiver: FanDutyDynReceiver,
     mut netstatus_receiver: NetStatusDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
     state: SharedState,
@@ -80,7 +80,8 @@ pub async fn serial_console(
                     line,
                     &mut uart,
                     pincontrol_channel,
-                    fanduty_signal,
+                    &fanduty_sender,
+                    &mut fanduty_receiver,
                     &mut netstatus_receiver,
                     &mut tempsensor_receiver,
                     state,
@@ -107,7 +108,8 @@ async fn cli_parser(
     line: &str,
     uart: &mut uart::Uart<'static, Async>,
     pincontrol_channel: PinControlChannel,
-    fanduty_signal: FanDutySignal,
+    fanduty_sender: &FanDutyDynSender,
+    fanduty_receiver: &mut FanDutyDynReceiver,
     netstatus_receiver: &mut NetStatusDynReceiver,
     tempsensor_receiver: &mut TempSensorDynReceiver,
     state: SharedState,
@@ -215,7 +217,7 @@ async fn cli_parser(
             Some(pwm_value) => match pwm_value.parse::<u8>() {
                 Ok(value) => {
                     if (0..=100).contains(&value) {
-                        fanduty_signal.signal(value);
+                        fanduty_sender.send(value);
                         "Fan duty set"
                     } else {
                         "Fan duty value must be between 0 and 100"
@@ -223,7 +225,11 @@ async fn cli_parser(
                 }
                 Err(_parse_error) => "Failed to parse fan duty value",
             },
-            None => "Fan duty value required for 'fan pwm'",
+            None => {
+                // Report the current fan value.
+                let fan_duty = fanduty_receiver.try_get();
+                &format!("{:?}", fan_duty)
+            }
         },
         (Some("fan"), Some("tachy")) => "TODO: Fan tachometer readout",
         (Some("fan"), Some(_)) => "Invalid subcommand for 'fan'",

@@ -93,9 +93,6 @@ async fn main(spawner: Spawner) {
     // A shared state for the display.
     let state = state::SharedState::new_standby();
 
-    // Init the fan duty PWM controller.
-    let (pwm_channel, fanduty_signal) = task::fan_duty::init(peripherals.LEDC, pin_fan_pwm);
-
     // Get a shareable channel to send messages to the pincontrol task.
     let pincontrol_channel = task::pin_control::init();
 
@@ -103,13 +100,16 @@ async fn main(spawner: Spawner) {
     let buzzer_channel = task::buzzer::init();
 
     //
-    // Watcher count: 1 for serial console, 2 for httpd workers
+    // Watcher count: 1 for serial console, 1 for httpd.
+
+    // Init the fan duty PWM controller.
+    let (pwm_channel, fanduty_watch) = task::fan_duty::init::<3>(peripherals.LEDC, pin_fan_pwm);
 
     // Get a watcher to await changes in temperature sensor readings.
-    let tempsensor_watch = task::temp_sensor::init::<4>();
+    let tempsensor_watch = task::temp_sensor::init::<3>();
 
     // Get a watcher to monitor the network interface.
-    let netstatus_watch = task::net_monitor::init::<4>();
+    let netstatus_watch = task::net_monitor::init::<2>();
 
     // // Set up the internal temperature sensor.
     // let _onboard_sensor =
@@ -148,7 +148,8 @@ async fn main(spawner: Spawner) {
             pin_uart_rx.into(),
             pin_uart_tx.into(),
             pincontrol_channel,
-            fanduty_signal,
+            fanduty_watch.dyn_sender(),
+            fanduty_watch.dyn_receiver().unwrap(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             state,
@@ -165,7 +166,10 @@ async fn main(spawner: Spawner) {
         ))?;
 
         // Control the case fan duty cycle.
-        spawner.spawn(task::fan_duty(pwm_channel, fanduty_signal))?;
+        spawner.spawn(task::fan_duty(
+            pwm_channel,
+            fanduty_watch.dyn_receiver().unwrap(),
+        ))?;
 
         // Take a temperature measurement periodically.
         spawner.spawn(task::temp_sensor(
@@ -175,7 +179,7 @@ async fn main(spawner: Spawner) {
 
         // Keep adjusting the fan duty based on the temperature measurements.
         spawner.spawn(task::fan_temp_control(
-            fanduty_signal,
+            fanduty_watch.dyn_sender(),
             tempsensor_watch.dyn_receiver().unwrap(),
         ))?;
 
@@ -184,7 +188,8 @@ async fn main(spawner: Spawner) {
             spawner,
             net_stack,
             pincontrol_channel,
-            fanduty_signal,
+            fanduty_watch.dyn_sender(),
+            fanduty_watch.dyn_receiver().unwrap(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             state,

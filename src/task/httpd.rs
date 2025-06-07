@@ -3,7 +3,7 @@ use crate::{
     memlog::{self, SharedLogger},
     state::SharedState,
     task::{
-        fan_duty::FanDutySignal,
+        fan_duty::{FanDutyDynReceiver, FanDutyDynSender},
         pin_control::{OnOff, PinControlChannel, PinControlMessage},
     },
 };
@@ -48,7 +48,8 @@ pub fn launch_workers(
     spawner: Spawner,
     stack: embassy_net::Stack<'static>,
     pincontrol_channel: PinControlChannel,
-    fanduty_signal: FanDutySignal,
+    fanduty_sender: FanDutyDynSender,
+    fanduty_receiver: FanDutyDynReceiver,
     netstatus_receiver: NetStatusDynReceiver,
     tempsensor_receiver: TempSensorDynReceiver,
     state: SharedState,
@@ -58,7 +59,8 @@ pub fn launch_workers(
         netstatus_receiver,
         tempsensor_receiver,
         pincontrol_channel,
-        fanduty_signal,
+        fanduty_sender,
+        fanduty_receiver,
         state,
         memlog,
     }
@@ -102,7 +104,8 @@ struct AppProps {
     netstatus_receiver: NetStatusDynReceiver,
     tempsensor_receiver: TempSensorDynReceiver,
     pincontrol_channel: PinControlChannel,
-    fanduty_signal: FanDutySignal,
+    fanduty_sender: FanDutyDynSender,
+    fanduty_receiver: FanDutyDynReceiver,
     state: SharedState,
     memlog: SharedLogger,
 }
@@ -240,11 +243,18 @@ impl AppBuilder for AppProps {
                 ("/fan/pwm", parse_path_segment()),
                 get(move |duty: u8| async move {
                     if (0u8..=100).contains(&duty) {
-                        app.lock().await.fanduty_signal.signal(duty);
+                        app.lock().await.fanduty_sender.send(duty);
                         format!("Fan duty set to {duty}\n")
                     } else {
                         "Fan duty value must be between 0 and 100\n".to_string()
                     }
+                }),
+            )
+            .route(
+                "/fan/pwm",
+                get(|| async {
+                    let value = app.lock().await.fanduty_receiver.try_get();
+                    format!("{:#?}\n", value)
                 }),
             )
             .route(
