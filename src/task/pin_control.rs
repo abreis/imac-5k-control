@@ -5,7 +5,7 @@ use embassy_time::{Duration, Timer};
 use esp_hal::gpio;
 
 // How long to toggle button control pins for.
-const BUTTON_DELAY_MS: Duration = Duration::from_millis(100);
+const BUTTON_DELAY_MS: Duration = Duration::from_millis(250);
 //
 const CHANNEL_BACKLOG: usize = 5;
 

@@ -1,5 +1,5 @@
 use super::temp_sensor::TempSensorDynReceiver;
-use crate::task::fan_duty::fan_pid::FanPidController;
+use crate::task::fan_control::fan_pid::FanPidController;
 use alloc::boxed::Box;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 use esp_hal::{
@@ -19,6 +19,7 @@ pub type FanDutyDynReceiver = watch::DynReceiver<'static, u8>;
 pub fn init<const WATCHERS: usize>(
     peripheral: LEDC<'static>,
     pin_fan_pwm: gpio::Output<'static>,
+    _pin_fan_tachy: gpio::Input<'static>,
 ) -> (
     ledc::channel::Channel<'static, LowSpeed>,
     FanDutySignal<WATCHERS>,

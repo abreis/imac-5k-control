@@ -4,7 +4,7 @@ use crate::{
     memlog::{self, SharedLogger},
     state::SharedState,
     task::{
-        fan_duty::{FanDutyDynReceiver, FanDutyDynSender},
+        fan_control::{FanDutyDynReceiver, FanDutyDynSender},
         net_monitor::NetStatusDynReceiver,
         pin_control::{OnOff, PinControlMessage},
     },

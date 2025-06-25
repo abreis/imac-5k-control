@@ -47,13 +47,19 @@ async fn main(spawner: Spawner) {
     // UART pins.
     let pin_uart_tx = peripherals.GPIO16;
     let pin_uart_rx = peripherals.GPIO17;
-    // G1 triggers the controller power button on level:high (via nMOS).
+    // G1 triggers the controller power button on level:high (pulls to low via nMOS).
     let pin_button_power = gpio::Output::new(peripherals.GPIO1, gpio::Level::Low, output_5ma);
-    // G5, G4, G3, G2 trigger controller buttons on level:low (via SPST switches).
-    let pin_button_menu = gpio::Output::new(peripherals.GPIO5, gpio::Level::High, output_5ma);
-    let pin_button_back = gpio::Output::new(peripherals.GPIO4, gpio::Level::High, output_5ma);
-    let pin_button_down = gpio::Output::new(peripherals.GPIO3, gpio::Level::High, output_5ma);
-    let pin_button_up = gpio::Output::new(peripherals.GPIO2, gpio::Level::High, output_5ma);
+    // G5, G4, G3, G2 trigger controller buttons on level:low.
+    // These pins are IE (Input Enabled) at and after reset.
+    // Voltage from controller board is ~3.3v. Pins need to be Open-Drain.
+    let output_opendrain = gpio::OutputConfig::default()
+        .with_drive_mode(gpio::DriveMode::OpenDrain)
+        .with_pull(gpio::Pull::None)
+        .with_drive_strength(gpio::DriveStrength::_5mA);
+    let pin_button_menu = gpio::Output::new(peripherals.GPIO5, gpio::Level::High, output_opendrain);
+    let pin_button_back = gpio::Output::new(peripherals.GPIO4, gpio::Level::High, output_opendrain);
+    let pin_button_down = gpio::Output::new(peripherals.GPIO3, gpio::Level::High, output_opendrain);
+    let pin_button_up = gpio::Output::new(peripherals.GPIO2, gpio::Level::High, output_opendrain);
     // G0 reads the case button, which pulls the line to GND when pressed.
     let pin_button_case = peripherals.GPIO0;
     // G6 is the 1Wire bus commanding the DS18B20 temperature sensors, which are phantom-powered.
@@ -64,7 +70,7 @@ async fn main(spawner: Spawner) {
     // G7 goes to the nMOS gate that switches 12VDC power on to the case fan.
     let pin_power_fan = gpio::Output::new(peripherals.GPIO7, gpio::Level::Low, output_5ma);
     // G19 reads the tachometer in the case fan.
-    let _pin_fan_tachy = gpio::Input::new(peripherals.GPIO19, gpio::InputConfig::default());
+    let pin_fan_tachy = gpio::Input::new(peripherals.GPIO19, gpio::InputConfig::default());
     // G20 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
     let pin_fan_pwm = gpio::Output::new(peripherals.GPIO20, gpio::Level::High, output_5ma);
     // G21 and G22 track the status LEDs on the display board.
@@ -103,7 +109,8 @@ async fn main(spawner: Spawner) {
     // Watcher count: 1 for serial console, 1 for httpd.
 
     // Init the fan duty PWM controller.
-    let (pwm_channel, fanduty_watch) = task::fan_duty::init::<3>(peripherals.LEDC, pin_fan_pwm);
+    let (pwm_channel, fanduty_watch) =
+        task::fan_control::init::<3>(peripherals.LEDC, pin_fan_pwm, pin_fan_tachy);
 
     // Get a watcher to await changes in temperature sensor readings.
     let tempsensor_watch = task::temp_sensor::init::<3>();
