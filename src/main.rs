@@ -2,11 +2,13 @@
 #![no_main]
 #![deny(clippy::mem_forget)]
 #![feature(impl_trait_in_assoc_type)]
+#![allow(clippy::too_many_arguments)]
 #![allow(dead_code)]
 
 extern crate alloc;
 
 mod config;
+mod futures;
 mod memlog;
 mod task;
 
@@ -73,7 +75,11 @@ async fn main(spawner: Spawner) {
     // Fan defaults to On.
     let _pin_power_fan = gpio::Output::new(peripherals.GPIO7, gpio::Level::High, output_5ma);
     // G19 reads the tachometer in the case fan.
-    let pin_fan_tachy = gpio::Input::new(peripherals.GPIO19, gpio::InputConfig::default());
+    // The fan has an open-collector output, so we need a pull-up here.
+    let pin_fan_tachy = gpio::Input::new(
+        peripherals.GPIO19,
+        gpio::InputConfig::default().with_pull(gpio::Pull::Up),
+    );
     // G20 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
     let pin_fan_pwm = gpio::Output::new(peripherals.GPIO20, gpio::Level::High, output_5ma);
     // G21 and G22 track the status LEDs on the display board.
@@ -101,7 +107,7 @@ async fn main(spawner: Spawner) {
     let (net_stack, net_runner) = task::net::init(wifi_interfaces.sta, rng).await;
 
     // Get a shareable channel to send messages to the pincontrol task.
-    let pincontrol_channel = task::pin_control::init();
+    let pincontrol_pubsub = task::pin_control::init::<3, 2>();
 
     // Get a shareable channel to send buzzer control messages.
     let buzzer_channel = task::buzzer::init();
@@ -110,8 +116,12 @@ async fn main(spawner: Spawner) {
     // Watcher count: 1 for serial console, 1 for httpd.
 
     // Init the fan duty PWM controller.
-    let (pwm_channel, fanduty_watch) =
-        task::fan_control::init::<3>(peripherals.LEDC, pin_fan_pwm, pin_fan_tachy);
+    let (pwm_channel, fanduty_watch, pcnt_unit, fantachy_watch) = task::fan_control::init::<3>(
+        peripherals.LEDC,
+        peripherals.PCNT,
+        pin_fan_pwm,
+        pin_fan_tachy,
+    );
 
     // Get a watcher to await changes in temperature sensor readings.
     let tempsensor_watch = task::temp_sensor::init::<3>();
@@ -148,7 +158,7 @@ async fn main(spawner: Spawner) {
             pin_button_back,
             pin_button_down,
             pin_button_up,
-            pincontrol_channel,
+            pincontrol_pubsub.dyn_subscriber().unwrap(),
         ))?;
 
         // Launch a control interface on UART0.
@@ -156,7 +166,7 @@ async fn main(spawner: Spawner) {
             peripherals.UART0.into(),
             pin_uart_rx.into(),
             pin_uart_tx.into(),
-            pincontrol_channel,
+            pincontrol_pubsub.dyn_publisher().unwrap(),
             fanduty_watch.dyn_sender(),
             fanduty_watch.dyn_receiver().unwrap(),
             netstatus_watch.dyn_receiver().unwrap(),
@@ -167,7 +177,7 @@ async fn main(spawner: Spawner) {
         // Watch the case button for presses.
         spawner.spawn(task::case_button(
             pin_button_case.into(),
-            pincontrol_channel,
+            pincontrol_pubsub.dyn_publisher().unwrap(),
             buzzer_channel,
             memlog,
         ))?;
@@ -177,6 +187,9 @@ async fn main(spawner: Spawner) {
             pwm_channel,
             fanduty_watch.dyn_receiver().unwrap(),
         ))?;
+
+        // Read the fan tachometer periodically.
+        spawner.spawn(task::fan_tachy(pcnt_unit, fantachy_watch.dyn_sender()))?;
 
         // Take a temperature measurement periodically.
         spawner.spawn(task::temp_sensor(
@@ -190,17 +203,17 @@ async fn main(spawner: Spawner) {
             tempsensor_watch.dyn_receiver().unwrap(),
         ))?;
 
-        // Launch httpd workers.
-        task::httpd::launch_workers(
-            spawner,
+        // Spawn the MQTT control task.
+        spawner.spawn(task::mqtt::run(
             net_stack,
-            pincontrol_channel,
-            fanduty_watch.dyn_sender(),
             fanduty_watch.dyn_receiver().unwrap(),
+            fantachy_watch.dyn_receiver().unwrap(),
+            pincontrol_pubsub.dyn_publisher().unwrap(),
+            pincontrol_pubsub.dyn_subscriber().unwrap(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
-        )?;
+        ))?;
 
         Ok(())
     }()

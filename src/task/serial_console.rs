@@ -1,5 +1,5 @@
 #![allow(clippy::too_many_arguments)]
-use super::{pin_control::PinControlChannel, temp_sensor::TempSensorDynReceiver};
+use super::{pin_control::PinControlPublisher, temp_sensor::TempSensorDynReceiver};
 use crate::{
     memlog::{self, SharedLogger},
     task::{
@@ -41,7 +41,7 @@ pub async fn serial_console(
     peripheral_uart: uart::AnyUart<'static>,
     pin_uart_rx: gpio::AnyPin<'static>,
     pin_uart_tx: gpio::AnyPin<'static>,
-    pincontrol_channel: PinControlChannel,
+    mut pincontrol_publisher: PinControlPublisher,
     fanduty_sender: FanDutyDynSender,
     mut fanduty_receiver: FanDutyDynReceiver,
     mut netstatus_receiver: NetStatusDynReceiver,
@@ -77,7 +77,7 @@ pub async fn serial_console(
                 cli_parser(
                     line,
                     &mut uart,
-                    pincontrol_channel,
+                    &mut pincontrol_publisher,
                     &fanduty_sender,
                     &mut fanduty_receiver,
                     &mut netstatus_receiver,
@@ -104,7 +104,7 @@ pub async fn serial_console(
 async fn cli_parser(
     line: &str,
     uart: &mut uart::Uart<'static, Async>,
-    pincontrol_channel: PinControlChannel,
+    pincontrol_publisher: &mut PinControlPublisher,
     fanduty_sender: &FanDutyDynSender,
     fanduty_receiver: &mut FanDutyDynReceiver,
     netstatus_receiver: &mut NetStatusDynReceiver,
@@ -139,25 +139,33 @@ async fn cli_parser(
         //
         // Trigger display controller buttons.
         (Some("button"), Some("power")) => {
-            pincontrol_channel
-                .send(PinControlMessage::ButtonPower)
+            pincontrol_publisher
+                .publish(PinControlMessage::ButtonPower)
                 .await;
             "Triggered button 'power'"
         }
         (Some("button"), Some("menu")) => {
-            pincontrol_channel.send(PinControlMessage::ButtonMenu).await;
+            pincontrol_publisher
+                .publish(PinControlMessage::ButtonMenu)
+                .await;
             "Triggered button 'menu'"
         }
         (Some("button"), Some("back")) => {
-            pincontrol_channel.send(PinControlMessage::ButtonBack).await;
+            pincontrol_publisher
+                .publish(PinControlMessage::ButtonBack)
+                .await;
             "Triggered button 'back'"
         }
         (Some("button"), Some("down")) => {
-            pincontrol_channel.send(PinControlMessage::ButtonDown).await;
+            pincontrol_publisher
+                .publish(PinControlMessage::ButtonDown)
+                .await;
             "Triggered button 'down'"
         }
         (Some("button"), Some("up")) => {
-            pincontrol_channel.send(PinControlMessage::ButtonUp).await;
+            pincontrol_publisher
+                .publish(PinControlMessage::ButtonUp)
+                .await;
             "Triggered button 'up'"
         }
         (Some("button"), Some(_)) => "Invalid subcommand for 'button'",

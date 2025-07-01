@@ -1,18 +1,19 @@
-#![allow(clippy::too_many_arguments)]
 use alloc::boxed::Box;
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, pubsub};
 use embassy_time::{Duration, Timer};
 use esp_hal::gpio;
+use serde::{Deserialize, Serialize};
 
 // How long to toggle button control pins for.
 const BUTTON_DELAY_MS: Duration = Duration::from_millis(250);
-//
-const CHANNEL_BACKLOG: usize = 5;
 
-pub type PinControlChannel =
-    &'static channel::Channel<NoopRawMutex, PinControlMessage, CHANNEL_BACKLOG>;
+const PUBSUB_CAPACITY: usize = 5;
+pub type PinControlPubSub<const P: usize, const S: usize> =
+    &'static pubsub::PubSubChannel<NoopRawMutex, PinControlMessage, PUBSUB_CAPACITY, S, P>;
+pub type PinControlPublisher = pubsub::DynPublisher<'static, PinControlMessage>;
+pub type PinControlSubscriber = pubsub::DynSubscriber<'static, PinControlMessage>;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub enum PinControlMessage {
     ButtonPower,
     // Note: doubles as 'Enter'
@@ -23,8 +24,8 @@ pub enum PinControlMessage {
     ButtonUp,
 }
 
-pub fn init() -> PinControlChannel {
-    Box::leak(Box::new(channel::Channel::new()))
+pub fn init<const PUBS: usize, const SUBS: usize>() -> PinControlPubSub<PUBS, SUBS> {
+    Box::leak(Box::new(pubsub::PubSubChannel::new()))
 }
 
 /// Triggers actions controlled by output pins.
@@ -35,37 +36,40 @@ pub async fn pin_control(
     mut pin_button_back: gpio::Output<'static>,
     mut pin_button_down: gpio::Output<'static>,
     mut pin_button_up: gpio::Output<'static>,
-    pincontrol_channel: PinControlChannel,
+    mut pincontrol_subscriber: PinControlSubscriber,
 ) {
     loop {
         use PinControlMessage::*;
-        match pincontrol_channel.receive().await {
-            // Power button is active high.
-            ButtonPower => {
-                pin_button_power.set_high();
-                Timer::after(BUTTON_DELAY_MS).await;
-                pin_button_power.set_low();
-            }
-            // Menu, Back, Up, Down buttons are active low.
-            ButtonMenu => {
-                pin_button_menu.set_low();
-                Timer::after(BUTTON_DELAY_MS).await;
-                pin_button_menu.set_high();
-            }
-            ButtonBack => {
-                pin_button_back.set_low();
-                Timer::after(BUTTON_DELAY_MS).await;
-                pin_button_back.set_high();
-            }
-            ButtonDown => {
-                pin_button_down.set_low();
-                Timer::after(BUTTON_DELAY_MS).await;
-                pin_button_down.set_high();
-            }
-            ButtonUp => {
-                pin_button_up.set_low();
-                Timer::after(BUTTON_DELAY_MS).await;
-                pin_button_up.set_high();
+
+        if let pubsub::WaitResult::Message(message) = pincontrol_subscriber.next_message().await {
+            match message {
+                // Power button is active high.
+                ButtonPower => {
+                    pin_button_power.set_high();
+                    Timer::after(BUTTON_DELAY_MS).await;
+                    pin_button_power.set_low();
+                }
+                // Menu, Back, Up, Down buttons are active low.
+                ButtonMenu => {
+                    pin_button_menu.set_low();
+                    Timer::after(BUTTON_DELAY_MS).await;
+                    pin_button_menu.set_high();
+                }
+                ButtonBack => {
+                    pin_button_back.set_low();
+                    Timer::after(BUTTON_DELAY_MS).await;
+                    pin_button_back.set_high();
+                }
+                ButtonDown => {
+                    pin_button_down.set_low();
+                    Timer::after(BUTTON_DELAY_MS).await;
+                    pin_button_down.set_high();
+                }
+                ButtonUp => {
+                    pin_button_up.set_low();
+                    Timer::after(BUTTON_DELAY_MS).await;
+                    pin_button_up.set_high();
+                }
             }
         }
     }

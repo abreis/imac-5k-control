@@ -1,7 +1,10 @@
-use super::pin_control::{PinControlChannel, PinControlMessage};
+use super::pin_control::PinControlMessage;
 use crate::{
     memlog::SharedLogger,
-    task::buzzer::{BuzzerAction, BuzzerChannel},
+    task::{
+        buzzer::{BuzzerAction, BuzzerChannel, BuzzerPattern},
+        pin_control::PinControlPublisher,
+    },
 };
 use embassy_time::Duration;
 use esp_hal::gpio;
@@ -9,10 +12,16 @@ use esp_hal::gpio;
 const BUTTON_HELD_DURATION_MIN: Duration = Duration::from_millis(500);
 const BUTTON_HELD_DURATION_MAX: Duration = Duration::from_millis(1500);
 
+const CASE_BUTTON_TONE: BuzzerPattern = &[
+    BuzzerAction::Beep { ms: 100 },
+    BuzzerAction::Pause { ms: 50 },
+    BuzzerAction::Beep { ms: 100 },
+];
+
 #[embassy_executor::task]
 pub async fn case_button(
     pin: gpio::AnyPin<'static>,
-    pincontrol_channel: PinControlChannel,
+    pincontrol_publisher: PinControlPublisher,
     buzzer_channel: BuzzerChannel,
     memlog: SharedLogger,
 ) {
@@ -34,9 +43,9 @@ pub async fn case_button(
         if held_duration > BUTTON_HELD_DURATION_MIN {
             memlog.info("case button triggered");
 
-            buzzer_channel.send(&[BuzzerAction::Beep { ms: 100 }]).await;
-            pincontrol_channel
-                .send(PinControlMessage::ButtonPower)
+            buzzer_channel.send(CASE_BUTTON_TONE).await;
+            pincontrol_publisher
+                .publish(PinControlMessage::ButtonPower)
                 .await;
         }
     }

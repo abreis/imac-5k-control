@@ -2,30 +2,45 @@ use super::temp_sensor::TempSensorDynReceiver;
 use crate::task::fan_control::fan_pid::FanPidController;
 use alloc::boxed::Box;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
+use embassy_time::{Duration, Timer};
 use esp_hal::{
     gpio,
     ledc::{self, LowSpeed, channel::ChannelIFace, timer::TimerIFace},
-    peripherals::LEDC,
+    pcnt,
+    peripherals::{LEDC, PCNT},
     time,
 };
 
 const INITIAL_FAN_DUTY: u8 = 100;
-pub type FanDutySignal<const W: usize> = &'static watch::Watch<NoopRawMutex, u8, W>;
+pub type FanDutyWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, u8, W>;
 pub type FanDutyDynSender = watch::DynSender<'static, u8>;
 pub type FanDutyDynReceiver = watch::DynReceiver<'static, u8>;
+
+// How long to count pulses for.
+// 300 rpms reports 10 pulses per second.
+const FAN_TACHY_COUNT_INTERVAL: Duration = Duration::from_secs(2);
+// How often to measure the fan's tachometer.
+const FAN_TACHY_MEASURE_INTERVAL: Duration = Duration::from_secs(20 - 2);
+
+pub type FanTachyWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, u16, W>;
+pub type FanTachyDynSender = watch::DynSender<'static, u16>;
+pub type FanTachyDynReceiver = watch::DynReceiver<'static, u16>;
 
 /// Initializes the fan PWM controller to be passed to the fan_duty task.
 #[must_use]
 pub fn init<const WATCHERS: usize>(
-    peripheral: LEDC<'static>,
+    ledc_peripheral: LEDC<'static>,
+    pcnt_peripheral: PCNT<'static>,
     pin_fan_pwm: gpio::Output<'static>,
-    _pin_fan_tachy: gpio::Input<'static>,
+    pin_fan_tachy: gpio::Input<'static>,
 ) -> (
     ledc::channel::Channel<'static, LowSpeed>,
-    FanDutySignal<WATCHERS>,
+    FanDutyWatch<WATCHERS>,
+    pcnt::unit::Unit<'static, 0>,
+    FanTachyWatch<WATCHERS>,
 ) {
     // LED Controller (LEDC) PWM setup.
-    let mut ledc = ledc::Ledc::new(peripheral);
+    let mut ledc = ledc::Ledc::new(ledc_peripheral);
     ledc.set_global_slow_clock(ledc::LSGlobalClkSource::APBClk);
 
     // The timer needs to be 'static for the LEDC channel to also be 'static.
@@ -48,8 +63,31 @@ pub fn init<const WATCHERS: usize>(
         })
         .unwrap();
 
+    // Pulse Counter (PCNT) setup for tachometer.
+    let pcnt = pcnt::Pcnt::new(pcnt_peripheral);
+    let pcnt_unit0 = pcnt.unit0;
+
+    // Set a high limit to avoid frequent interrupts
+    pcnt_unit0.set_high_limit(Some(i16::MAX)).unwrap();
+    pcnt_unit0.set_low_limit(Some(i16::MIN)).unwrap();
+
+    // Configure channel 0 to count on rising edges.
+    let pcnt_ch0 = &pcnt_unit0.channel0;
+    pcnt_ch0.set_edge_signal(pin_fan_tachy);
+    pcnt_ch0.set_ctrl_mode(pcnt::channel::CtrlMode::Keep, pcnt::channel::CtrlMode::Keep);
+    pcnt_ch0.set_input_mode(
+        pcnt::channel::EdgeMode::Increment,
+        pcnt::channel::EdgeMode::Hold,
+    );
+
+    // Clear counter and start counting.
+    pcnt_unit0.clear();
+    pcnt_unit0.resume();
+
     let fanduty_watch = Box::leak(Box::new(watch::Watch::new()));
-    (ledc_channel0, fanduty_watch)
+    let fanrpm_watch = Box::leak(Box::new(watch::Watch::new()));
+
+    (ledc_channel0, fanduty_watch, pcnt_unit0, fanrpm_watch)
 }
 
 #[embassy_executor::task]
@@ -61,6 +99,28 @@ pub async fn fan_duty(
         // Wait for a new duty cycle to be signalled.
         let new_fan_duty = fanduty_receiver.changed().await;
         pwm_channel.set_duty(new_fan_duty).unwrap(); // Does not fail if timer and channel are configured, and duty ∈ [0,100]
+    }
+}
+
+#[embassy_executor::task]
+pub async fn fan_tachy(
+    pcnt_unit: pcnt::unit::Unit<'static, 0>,
+    fantachy_sender: FanTachyDynSender,
+) {
+    loop {
+        Timer::after(FAN_TACHY_MEASURE_INTERVAL).await;
+
+        // Start a new measurement, wait for pulses, count.
+        pcnt_unit.clear();
+        Timer::after(FAN_TACHY_COUNT_INTERVAL).await;
+        let pulse_count = pcnt_unit.counter.get() as u64;
+
+        // 2 pulses per revolution: rpm = pulses * 60 / 2.
+        let rpm = pulse_count * 60 / 2;
+        // If counting interval is less than 1s, adjust.
+        let rpm = rpm * 1000 / FAN_TACHY_COUNT_INTERVAL.as_micros();
+
+        fantachy_sender.send(rpm as u16);
     }
 }
 
