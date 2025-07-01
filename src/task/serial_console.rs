@@ -5,7 +5,7 @@ use crate::{
     task::{
         fan_control::{FanDutyDynReceiver, FanDutyDynSender},
         net_monitor::NetStatusDynReceiver,
-        pin_control::{OnOff, PinControlMessage},
+        pin_control::PinControlMessage,
     },
 };
 use alloc::{format, string::String};
@@ -111,8 +111,6 @@ async fn cli_parser(
     tempsensor_receiver: &mut TempSensorDynReceiver,
     memlog: SharedLogger,
 ) -> Result<(), uart::TxError> {
-    use OnOff::*;
-
     // Get the command from the first argument.
     let mut chunks = line.split_whitespace();
     let response = match (chunks.next(), chunks.next()) {
@@ -123,9 +121,6 @@ async fn cli_parser(
              · back\r\n\
              · down\r\n\
              · up\r\n\
-             power\r\n\
-             · display {on|off}\r\n\
-             · fan {on|off}\r\n\
              fan\r\n\
              · pwm <duty>\r\n\
              · tachy\r\n\
@@ -167,43 +162,6 @@ async fn cli_parser(
         }
         (Some("button"), Some(_)) => "Invalid subcommand for 'button'",
         (Some("button"), None) => "Subcommand required for 'button'",
-
-        //
-        // Control 24V power to display.
-        (Some("power"), Some("display")) => match chunks.next() {
-            Some("on") => {
-                pincontrol_channel
-                    .send(PinControlMessage::DisplayPower(On))
-                    .await;
-                "Display power turned on"
-            }
-            Some("off") => {
-                pincontrol_channel
-                    .send(PinControlMessage::DisplayPower(Off))
-                    .await;
-                "Display power turned off"
-            }
-            None => "Subcommand required for 'power display'",
-            _ => "Invalid subcommand for 'power display'",
-        },
-        (Some("power"), Some("fan")) => match chunks.next() {
-            Some("on") => {
-                pincontrol_channel
-                    .send(PinControlMessage::FanPower(On))
-                    .await;
-                "Fan power turned on"
-            }
-            Some("off") => {
-                pincontrol_channel
-                    .send(PinControlMessage::FanPower(Off))
-                    .await;
-                "Fan power turned off"
-            }
-            None => "Subcommand required for 'power fan'",
-            _ => "Invalid subcommand for 'power fan'",
-        },
-        (Some("power"), Some(_)) => "Invalid subcommand for 'power'",
-        (Some("power"), None) => "Subcommand required for 'power'",
 
         //
         // Fan controls, duty cycle and tachometer.

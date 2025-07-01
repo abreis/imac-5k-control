@@ -13,12 +13,6 @@ pub type PinControlChannel =
     &'static channel::Channel<NoopRawMutex, PinControlMessage, CHANNEL_BACKLOG>;
 
 #[derive(Copy, Clone)]
-pub enum OnOff {
-    On,
-    Off,
-}
-
-#[derive(Copy, Clone)]
 pub enum PinControlMessage {
     ButtonPower,
     // Note: doubles as 'Enter'
@@ -27,8 +21,6 @@ pub enum PinControlMessage {
     ButtonBack,
     ButtonDown,
     ButtonUp,
-    DisplayPower(OnOff),
-    FanPower(OnOff),
 }
 
 pub fn init() -> PinControlChannel {
@@ -43,12 +35,9 @@ pub async fn pin_control(
     mut pin_button_back: gpio::Output<'static>,
     mut pin_button_down: gpio::Output<'static>,
     mut pin_button_up: gpio::Output<'static>,
-    mut pin_power_display: gpio::Output<'static>,
-    mut pin_power_fan: gpio::Output<'static>,
     pincontrol_channel: PinControlChannel,
 ) {
     loop {
-        use OnOff::*;
         use PinControlMessage::*;
         match pincontrol_channel.receive().await {
             // Power button is active high.
@@ -78,15 +67,6 @@ pub async fn pin_control(
                 Timer::after(BUTTON_DELAY_MS).await;
                 pin_button_up.set_high();
             }
-            // Power control MOSFETs get turned on or off.
-            DisplayPower(value) => match value {
-                On => pin_power_display.set_high(),
-                Off => pin_power_display.set_low(),
-            },
-            FanPower(value) => match value {
-                On => pin_power_fan.set_high(),
-                Off => pin_power_fan.set_low(),
-            },
         }
     }
 }

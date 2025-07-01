@@ -42,6 +42,7 @@ async fn main(spawner: Spawner) {
     let _pin12_unused = peripherals.GPIO12;
     let _pin13_unused = peripherals.GPIO13;
     let _pin15_unused = peripherals.GPIO15;
+    let _pin15_unused = peripherals.GPIO18;
     // let _pin21_unused = peripherals.GPIO21;
     // let _pin22_unused = peripherals.GPIO22;
     let _pin23_unused = peripherals.GPIO23;
@@ -67,9 +68,10 @@ async fn main(spawner: Spawner) {
     let pin_sensor_display_temp = peripherals.GPIO6;
     // G18 goes to the Power MOSFET gate that switches 24VDC power on to the display controller.
     // IRLZ44N I_gate = 48nC * 1Hz = 48nA (current depends on switching frequency)
-    let pin_power_display = gpio::Output::new(peripherals.GPIO18, gpio::Level::Low, output_5ma);
+    // let pin_power_display = gpio::Output::new(peripherals.GPIO18, gpio::Level::Low, output_5ma);
     // G7 goes to the nMOS gate that switches 12VDC power on to the case fan.
-    let pin_power_fan = gpio::Output::new(peripherals.GPIO7, gpio::Level::Low, output_5ma);
+    // Fan defaults to On.
+    let _pin_power_fan = gpio::Output::new(peripherals.GPIO7, gpio::Level::High, output_5ma);
     // G19 reads the tachometer in the case fan.
     let pin_fan_tachy = gpio::Input::new(peripherals.GPIO19, gpio::InputConfig::default());
     // G20 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
@@ -86,6 +88,7 @@ async fn main(spawner: Spawner) {
 
     // Initialize an in-memory logger with space for 480 characters.
     let memlog = memlog::init(480);
+    memlog.enable_print();
     memlog.info("imac5k display controller initialized");
 
     // Set up the WiFi.
@@ -145,8 +148,6 @@ async fn main(spawner: Spawner) {
             pin_button_back,
             pin_button_down,
             pin_button_up,
-            pin_power_display,
-            pin_power_fan,
             pincontrol_channel,
         ))?;
 

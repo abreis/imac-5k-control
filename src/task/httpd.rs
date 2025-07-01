@@ -3,7 +3,7 @@ use crate::{
     memlog::{self, SharedLogger},
     task::{
         fan_control::{FanDutyDynReceiver, FanDutyDynSender},
-        pin_control::{OnOff, PinControlChannel, PinControlMessage},
+        pin_control::{PinControlChannel, PinControlMessage},
     },
 };
 use alloc::{
@@ -184,54 +184,6 @@ impl AppBuilder for AppProps {
                         .send(PinControlMessage::ButtonUp)
                         .await;
                     "Triggered button 'up'\n"
-                }),
-            )
-            .route(
-                ("/power/display", parse_path_segment()),
-                get(move |action: String| async move {
-                    match action.as_str() {
-                        "on" => {
-                            app.lock()
-                                .await
-                                .pincontrol_channel
-                                .send(PinControlMessage::DisplayPower(OnOff::On))
-                                .await;
-                            "Display power turned on\n"
-                        }
-                        "off" => {
-                            app.lock()
-                                .await
-                                .pincontrol_channel
-                                .send(PinControlMessage::DisplayPower(OnOff::Off))
-                                .await;
-                            "Display power turned off\n"
-                        }
-                        _ => "Invalid action\n",
-                    }
-                }),
-            )
-            .route(
-                ("/power/fan", parse_path_segment()),
-                get(move |action: String| async move {
-                    match action.as_str() {
-                        "on" => {
-                            app.lock()
-                                .await
-                                .pincontrol_channel
-                                .send(PinControlMessage::FanPower(OnOff::On))
-                                .await;
-                            "Fan power turned on\n"
-                        }
-                        "off" => {
-                            app.lock()
-                                .await
-                                .pincontrol_channel
-                                .send(PinControlMessage::FanPower(OnOff::Off))
-                                .await;
-                            "Fan power turned off\n"
-                        }
-                        _ => "Invalid action\n",
-                    }
                 }),
             )
             .route(
