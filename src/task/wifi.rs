@@ -8,6 +8,9 @@ use esp_wifi::{
     wifi::{self, WifiState},
 };
 
+use crate::config::WIFI_PASS;
+use crate::config::WIFI_SSID;
+
 // How long to wait before attempting to reconnect to WiFi.
 const WIFI_RECONNECT_PAUSE: Duration = Duration::from_secs(5);
 
@@ -44,7 +47,7 @@ pub async fn init(
 }
 
 #[embassy_executor::task]
-pub async fn permanent_connection(
+pub async fn wifi_permanent_connection(
     mut controller: wifi::WifiController<'static>,
     memlog: SharedLogger,
 ) {

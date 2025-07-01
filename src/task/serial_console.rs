@@ -2,7 +2,6 @@
 use super::{pin_control::PinControlChannel, temp_sensor::TempSensorDynReceiver};
 use crate::{
     memlog::{self, SharedLogger},
-    state::SharedState,
     task::{
         fan_control::{FanDutyDynReceiver, FanDutyDynSender},
         net_monitor::NetStatusDynReceiver,
@@ -47,7 +46,6 @@ pub async fn serial_console(
     mut fanduty_receiver: FanDutyDynReceiver,
     mut netstatus_receiver: NetStatusDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
-    state: SharedState,
     memlog: SharedLogger,
 ) {
     // UART setup. When in loopback mode, ensure TX is configured first (#2914).
@@ -84,7 +82,6 @@ pub async fn serial_console(
                     &mut fanduty_receiver,
                     &mut netstatus_receiver,
                     &mut tempsensor_receiver,
-                    state,
                     memlog,
                 )
                 .await?;
@@ -112,7 +109,6 @@ async fn cli_parser(
     fanduty_receiver: &mut FanDutyDynReceiver,
     netstatus_receiver: &mut NetStatusDynReceiver,
     tempsensor_receiver: &mut TempSensorDynReceiver,
-    state: SharedState,
     memlog: SharedLogger,
 ) -> Result<(), uart::TxError> {
     use OnOff::*;
@@ -139,8 +135,6 @@ async fn cli_parser(
              net\r\n\
              · read\r\n\
              · watch\r\n\
-             state\r\n\
-             · read\r\n\
              log\r\n\
              · read\r\n\
              · clear\r\n\
@@ -318,12 +312,6 @@ async fn cli_parser(
         }
         (Some("temp"), Some(_)) => "Invalid subcommand for 'temp'",
         (Some("temp"), None) => "Subcommand required for 'temp'",
-
-        //
-        // Display state.
-        (Some("state"), Some("read")) => &format!("Display state: {:?}", state.get()),
-        (Some("state"), Some(_)) => "Invalid subcommand for 'state'",
-        (Some("state"), None) => "Subcommand required for 'state'",
 
         //
         //

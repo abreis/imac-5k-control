@@ -10,6 +10,10 @@ pub type TempSensorWatch<const W: usize> =
 pub type TempSensorDynSender = watch::DynSender<'static, TemperatureReading>;
 pub type TempSensorDynReceiver = watch::DynReceiver<'static, TemperatureReading>;
 
+pub fn init<const WATCHERS: usize>() -> TempSensorWatch<WATCHERS> {
+    Box::leak(Box::new(watch::Watch::new()))
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct TemperatureReading {
     pub timestamp: Instant,
@@ -17,12 +21,7 @@ pub struct TemperatureReading {
     pub retries: u8,
 }
 
-pub fn init<const WATCHERS: usize>() -> TempSensorWatch<WATCHERS> {
-    Box::leak(Box::new(watch::Watch::new()))
-}
-
 const DSPL_TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
-// const PSU_TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
 // How long to wait between temperature readings.
 const TEMP_MEASUREMENT_INTERVAL: Duration = Duration::from_secs(5);
 // How many attempts to retry reading after a checksum error.

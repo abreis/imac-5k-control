@@ -1,9 +1,7 @@
-use super::pin_control::PinControlChannel;
+use super::pin_control::{PinControlChannel, PinControlMessage};
 use crate::{
     memlog::SharedLogger,
-    power,
-    state::{SharedState, State},
-    task::buzzer::BuzzerChannel,
+    task::buzzer::{BuzzerAction, BuzzerChannel},
 };
 use embassy_time::Duration;
 use esp_hal::gpio;
@@ -13,7 +11,6 @@ const BUTTON_HELD_DURATION_MAX: Duration = Duration::from_millis(1500);
 
 #[embassy_executor::task]
 pub async fn case_button(
-    state: SharedState,
     pin: gpio::AnyPin<'static>,
     pincontrol_channel: PinControlChannel,
     buzzer_channel: BuzzerChannel,
@@ -35,23 +32,12 @@ pub async fn case_button(
 
         let held_duration = fall_time.elapsed();
         if held_duration > BUTTON_HELD_DURATION_MIN {
-            memlog.debug("case button triggered");
+            memlog.info("case button triggered");
 
-            match state.get() {
-                State::Standby => {
-                    power::power_on(state, pincontrol_channel, buzzer_channel, memlog)
-                        .await
-                        .unwrap()
-                }
-                State::DisplayOn => {
-                    power::power_off(state, pincontrol_channel, buzzer_channel, memlog)
-                        .await
-                        .unwrap()
-                }
-                _invalid_state => {
-                    memlog.warn("case button pressed while in invalid state, ignored")
-                }
-            }
+            buzzer_channel.send(&[BuzzerAction::Beep { ms: 100 }]).await;
+            pincontrol_channel
+                .send(PinControlMessage::ButtonPower)
+                .await;
         }
     }
 }

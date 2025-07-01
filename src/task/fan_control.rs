@@ -75,8 +75,7 @@ pub async fn fan_temp_control(
     loop {
         if let Ok(sensor_temp) = tempsensor_receiver.changed().await.temperature {
             let new_duty_cycle = pid_controller.update(sensor_temp);
-            let new_duty_cycle = libm::roundf(new_duty_cycle) as u8;
-            fanduty_sender.send(new_duty_cycle);
+            fanduty_sender.send(new_duty_cycle as u8);
         }
     }
 }

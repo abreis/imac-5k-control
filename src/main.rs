@@ -1,12 +1,13 @@
 #![no_std]
 #![no_main]
+#![deny(clippy::mem_forget)]
 #![feature(impl_trait_in_assoc_type)]
+#![allow(dead_code)]
 
 extern crate alloc;
 
+mod config;
 mod memlog;
-mod power;
-mod state;
 mod task;
 
 use embassy_executor::{SpawnError, Spawner};
@@ -16,8 +17,8 @@ use esp_hal::gpio;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::timer::timg::TimerGroup;
 
-// NOTES
-// - esp_println sends prints to 'jtag-serial' via the USB port
+
+esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -96,9 +97,6 @@ async fn main(spawner: Spawner) {
     // Set up the network stack.
     let (net_stack, net_runner) = task::net::init(wifi_interfaces.sta, rng).await;
 
-    // A shared state for the display.
-    let state = state::SharedState::new_standby();
-
     // Get a shareable channel to send messages to the pincontrol task.
     let pincontrol_channel = task::pin_control::init();
 
@@ -129,7 +127,10 @@ async fn main(spawner: Spawner) {
         spawner.spawn(task::buzzer_control(pin_buzzer, buzzer_channel))?;
 
         // Keep the wifi connected.
-        spawner.spawn(task::wifi::permanent_connection(wifi_controller, memlog))?;
+        spawner.spawn(task::wifi::wifi_permanent_connection(
+            wifi_controller,
+            memlog,
+        ))?;
 
         // Run the network stack.
         spawner.spawn(task::net::stack_runner(net_runner))?;
@@ -159,13 +160,11 @@ async fn main(spawner: Spawner) {
             fanduty_watch.dyn_receiver().unwrap(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
-            state,
             memlog,
         ))?;
 
         // Watch the case button for presses.
         spawner.spawn(task::case_button(
-            state,
             pin_button_case.into(),
             pincontrol_channel,
             buzzer_channel,
@@ -199,7 +198,6 @@ async fn main(spawner: Spawner) {
             fanduty_watch.dyn_receiver().unwrap(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
-            state,
             memlog,
         )?;
 

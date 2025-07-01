@@ -1,7 +1,6 @@
 use super::{net_monitor::NetStatusDynReceiver, temp_sensor::TempSensorDynReceiver};
 use crate::{
     memlog::{self, SharedLogger},
-    state::SharedState,
     task::{
         fan_control::{FanDutyDynReceiver, FanDutyDynSender},
         pin_control::{OnOff, PinControlChannel, PinControlMessage},
@@ -52,7 +51,6 @@ pub fn launch_workers(
     fanduty_receiver: FanDutyDynReceiver,
     netstatus_receiver: NetStatusDynReceiver,
     tempsensor_receiver: TempSensorDynReceiver,
-    state: SharedState,
     memlog: SharedLogger,
 ) -> Result<(), SpawnError> {
     let app = AppProps {
@@ -61,7 +59,6 @@ pub fn launch_workers(
         pincontrol_channel,
         fanduty_sender,
         fanduty_receiver,
-        state,
         memlog,
     }
     .build_app();
@@ -106,7 +103,6 @@ struct AppProps {
     pincontrol_channel: PinControlChannel,
     fanduty_sender: FanDutyDynSender,
     fanduty_receiver: FanDutyDynReceiver,
-    state: SharedState,
     memlog: SharedLogger,
 }
 impl AppBuilder for AppProps {
@@ -128,7 +124,6 @@ impl AppBuilder for AppProps {
                      GET /power/display/{on,off}\n\
                      GET /power/fan/{on,off}\n\
                      GET /fan/pwm/<duty>\n\
-                     GET /state\n\
                      GET /temp\n\
                      GET /net\n\
                      GET /log\n\
@@ -256,10 +251,6 @@ impl AppBuilder for AppProps {
                     let value = app.lock().await.fanduty_receiver.try_get();
                     format!("{:#?}\n", value)
                 }),
-            )
-            .route(
-                "/state",
-                get(|| async { format!("{:#?}\n", app.lock().await.state.get()) }),
             )
             .route(
                 "/temp",
