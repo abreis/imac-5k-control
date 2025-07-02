@@ -150,9 +150,9 @@ pub async fn run(
         match stack.dns_query(MQTT_SERVER_ADDR, DnsQueryType::A).await {
             Ok(mut dns_result) => match dns_result.pop() {
                 Some(addr) => break 'dns addr,
-                None => memlog.warn("empty dns response to broker address query"),
+                None => memlog.warn("mqtt: empty dns response"),
             },
-            Err(_) => memlog.warn("failed to resolve broker address from dns"),
+            Err(_) => memlog.warn("mqtt: failed to resolve broker address"),
         };
 
         // Retry DNS request every 10 seconds.
@@ -216,6 +216,7 @@ pub async fn run(
         };
 
         // Connected.
+        memlog.info("mqtt: connected");
 
         //
         // Main loop.

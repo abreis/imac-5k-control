@@ -51,8 +51,6 @@ pub async fn wifi_permanent_connection(
     mut controller: wifi::WifiController<'static>,
     memlog: SharedLogger,
 ) {
-    memlog.debug(format!("wifi: state: {:?}", wifi::wifi_state()));
-
     loop {
         // If we're still connected, wait until we disconnect.
         if wifi::wifi_state() == WifiState::StaConnected {
@@ -66,13 +64,12 @@ pub async fn wifi_permanent_connection(
 
         // Start the WiFi controller if necessary.
         if !matches!(controller.is_started(), Ok(true)) {
-            // TODO: do we need to set_configuration and set_power_saving here in the loop?
-            memlog.debug("wifi: starting controller");
+            memlog.info("wifi: starting controller");
             controller.start_async().await.unwrap();
         }
 
         match controller.connect_async().await {
-            Ok(()) => memlog.debug("wifi: connected"),
+            Ok(()) => memlog.info("wifi: connected"),
             Err(error) => memlog.debug(format!("wifi: connect error: {:?}", error)),
         }
     }
