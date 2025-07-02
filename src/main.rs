@@ -19,7 +19,6 @@ use esp_hal::gpio;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::timer::timg::TimerGroup;
 
-
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_hal_embassy::main]
@@ -116,12 +115,8 @@ async fn main(spawner: Spawner) {
     // Watcher count: 1 for serial console, 1 for httpd.
 
     // Init the fan duty PWM controller.
-    let (pwm_channel, fanduty_watch, pcnt_unit, fantachy_watch) = task::fan_control::init::<3>(
-        peripherals.LEDC,
-        peripherals.PCNT,
-        pin_fan_pwm,
-        pin_fan_tachy,
-    );
+    let (pwm_channel, fanduty_watch, fantachy_watch) =
+        task::fan_control::init::<3>(peripherals.LEDC, pin_fan_pwm);
 
     // Get a watcher to await changes in temperature sensor readings.
     let tempsensor_watch = task::temp_sensor::init::<3>();
@@ -189,7 +184,7 @@ async fn main(spawner: Spawner) {
         ))?;
 
         // Read the fan tachometer periodically.
-        spawner.spawn(task::fan_tachy(pcnt_unit, fantachy_watch.dyn_sender()))?;
+        spawner.spawn(task::fan_tachy(pin_fan_tachy, fantachy_watch.dyn_sender()))?;
 
         // Take a temperature measurement periodically.
         spawner.spawn(task::temp_sensor(

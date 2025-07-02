@@ -2,12 +2,11 @@ use super::temp_sensor::TempSensorDynReceiver;
 use crate::task::fan_control::fan_pid::FanPidController;
 use alloc::boxed::Box;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use esp_hal::{
     gpio,
     ledc::{self, LowSpeed, channel::ChannelIFace, timer::TimerIFace},
-    pcnt,
-    peripherals::{LEDC, PCNT},
+    peripherals::LEDC,
     time,
 };
 
@@ -16,11 +15,8 @@ pub type FanDutyWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, u8, 
 pub type FanDutyDynSender = watch::DynSender<'static, u8>;
 pub type FanDutyDynReceiver = watch::DynReceiver<'static, u8>;
 
-// How long to count pulses for.
-// 300 rpms reports 10 pulses per second.
-const FAN_TACHY_COUNT_INTERVAL: Duration = Duration::from_secs(2);
 // How often to measure the fan's tachometer.
-const FAN_TACHY_MEASURE_INTERVAL: Duration = Duration::from_secs(20 - 2);
+const FAN_TACHY_MEASURE_INTERVAL: Duration = Duration::from_secs(20);
 
 pub type FanTachyWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, u16, W>;
 pub type FanTachyDynSender = watch::DynSender<'static, u16>;
@@ -30,13 +26,10 @@ pub type FanTachyDynReceiver = watch::DynReceiver<'static, u16>;
 #[must_use]
 pub fn init<const WATCHERS: usize>(
     ledc_peripheral: LEDC<'static>,
-    pcnt_peripheral: PCNT<'static>,
     pin_fan_pwm: gpio::Output<'static>,
-    pin_fan_tachy: gpio::Input<'static>,
 ) -> (
     ledc::channel::Channel<'static, LowSpeed>,
     FanDutyWatch<WATCHERS>,
-    pcnt::unit::Unit<'static, 0>,
     FanTachyWatch<WATCHERS>,
 ) {
     // LED Controller (LEDC) PWM setup.
@@ -63,31 +56,10 @@ pub fn init<const WATCHERS: usize>(
         })
         .unwrap();
 
-    // Pulse Counter (PCNT) setup for tachometer.
-    let pcnt = pcnt::Pcnt::new(pcnt_peripheral);
-    let pcnt_unit0 = pcnt.unit0;
-
-    // Set a high limit to avoid frequent interrupts
-    pcnt_unit0.set_high_limit(Some(i16::MAX)).unwrap();
-    pcnt_unit0.set_low_limit(Some(i16::MIN)).unwrap();
-
-    // Configure channel 0 to count on rising edges.
-    let pcnt_ch0 = &pcnt_unit0.channel0;
-    pcnt_ch0.set_edge_signal(pin_fan_tachy);
-    pcnt_ch0.set_ctrl_mode(pcnt::channel::CtrlMode::Keep, pcnt::channel::CtrlMode::Keep);
-    pcnt_ch0.set_input_mode(
-        pcnt::channel::EdgeMode::Increment,
-        pcnt::channel::EdgeMode::Hold,
-    );
-
-    // Clear counter and start counting.
-    pcnt_unit0.clear();
-    pcnt_unit0.resume();
-
     let fanduty_watch = Box::leak(Box::new(watch::Watch::new()));
     let fanrpm_watch = Box::leak(Box::new(watch::Watch::new()));
 
-    (ledc_channel0, fanduty_watch, pcnt_unit0, fanrpm_watch)
+    (ledc_channel0, fanduty_watch, fanrpm_watch)
 }
 
 #[embassy_executor::task]
@@ -104,21 +76,69 @@ pub async fn fan_duty(
 
 #[embassy_executor::task]
 pub async fn fan_tachy(
-    pcnt_unit: pcnt::unit::Unit<'static, 0>,
+    mut pin_fan_tachy: gpio::Input<'static>,
     fantachy_sender: FanTachyDynSender,
 ) {
-    loop {
+    'tachy: loop {
         Timer::after(FAN_TACHY_MEASURE_INTERVAL).await;
 
-        // Start a new measurement, wait for pulses, count.
-        pcnt_unit.clear();
-        Timer::after(FAN_TACHY_COUNT_INTERVAL).await;
-        let pulse_count = pcnt_unit.counter.get() as u64;
+        // Measure 10 pulses to get a good average.
+        const PULSES_TO_MEASURE: u32 = 10;
+        // 1/2 pulse width at 2200 rpms (2 pulses per revolution) is 6.2ms.
+        // Any less than that and the pulse is likely a glitch.
+        // 1/2 pulse width at 500 rpms (2 pulses per revolution) is 33ms.
+        // Any more than that and the fan is probably stopped.
+        const PULSE_MIN: Duration = Duration::from_millis(25);
+        const PULSE_MAX: Duration = Duration::from_millis(132);
 
-        // 2 pulses per revolution: rpm = pulses * 60 / 2.
-        let rpm = pulse_count * 60 / 2;
-        // If counting interval is less than 1s, adjust.
-        let rpm = rpm * 1000 / FAN_TACHY_COUNT_INTERVAL.as_micros();
+        enum PulseError {
+            TooLong,
+            TooShort,
+        }
+
+        let pulse_widths: Result<[Duration; 10], PulseError> = async {
+            let mut pulse_widths: [Duration; 10] = [Duration::MIN; 10];
+
+            // Measure 10 pulses.
+            for pulse_slot in pulse_widths.iter_mut() {
+                // Wait for a falling edge.
+                with_timeout(PULSE_MAX, pin_fan_tachy.wait_for_falling_edge())
+                    .await
+                    .map_err(|_| PulseError::TooLong)?;
+                let start_time = Instant::now();
+
+                // Wait for the rising edge.
+                with_timeout(PULSE_MAX, pin_fan_tachy.wait_for_rising_edge())
+                    .await
+                    .map_err(|_| PulseError::TooLong)?;
+
+                let elapsed = start_time.elapsed();
+                if elapsed < PULSE_MIN {
+                    return Err(PulseError::TooShort);
+                } else {
+                    *pulse_slot = elapsed;
+                }
+            }
+
+            Ok(pulse_widths)
+        }
+        .await;
+
+        let rpm = match pulse_widths {
+            // A pulse measurement timed out, report a zero duty.
+            Err(PulseError::TooLong) => 0,
+            // If pulse < PULSE_MIN, a zero duty might be wrong, should be no duty.
+            Err(PulseError::TooShort) => continue 'tachy,
+
+            Ok(widths) => {
+                // Average the durations.
+                let duration_total_us = widths.iter().map(Duration::as_micros).sum::<u64>();
+                let duration_avg_us = duration_total_us / 10;
+
+                // From a falling to a rising edge is 1/4 of the revolution length.
+                60_000_000 / (duration_avg_us * 4)
+            }
+        };
 
         fantachy_sender.send(rpm as u16);
     }
@@ -142,7 +162,7 @@ pub async fn fan_temp_control(
 
 mod fan_pid {
     // Default target temperature.
-    const SETPOINT_TEMP_C: f32 = 70.0;
+    const SETPOINT_TEMP_C: f32 = 65.0;
 
     // PID output is mapped to [-PID_SYMMETRIC_LIMIT, +PID_SYMMETRIC_LIMIT].
     // Actual fan duty cycle will be pid_output + FAN_DUTY_OFFSET.
