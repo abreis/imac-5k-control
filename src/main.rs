@@ -26,7 +26,7 @@ async fn main(spawner: Spawner) {
     // let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
     let peripherals = esp_hal::init(esp_config);
-    esp_alloc::heap_allocator!(size: 72 * 1024);
+    esp_alloc::heap_allocator!(size: 128 * 1024);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_interrupt =
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
