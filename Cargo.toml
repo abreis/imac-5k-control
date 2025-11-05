@@ -14,11 +14,11 @@ doctest = false
 
 [dependencies]
 critical-section = "1.2.0"
-embassy-embedded-hal = "0.3.0"
+embassy-embedded-hal = "0.5.0"
 # Enabling nightly statically allocates the tasks, no arena is used.
-embassy-executor = { version = "0.7.0", features = ["nightly"] }
+embassy-executor = { version = "0.9.1", features = ["nightly"] }
 embassy-futures = "0.1.1"
-embassy-net = { version = "0.7.0", features = [
+embassy-net = { version = "0.7.1", features = [
     "dhcpv4",
     "medium-ethernet",
     "tcp",
@@ -27,43 +27,39 @@ embassy-net = { version = "0.7.0", features = [
     "icmp",
 ] }
 embassy-sync = "0.7.0"
-embassy-time = { version = "0.4.0", features = ["generic-queue-8"] }
-esp-alloc = "0.8.0"
-esp-backtrace = { version = "0.16.0", features = [
+embassy-time = "0.5.0"
+esp-alloc = "0.9.0"
+esp-backtrace = { version = "0.18.1", features = [
     "esp32c6",
-    "exception-handler",
     "panic-handler",
     "println",
 ] }
-esp-bootloader-esp-idf = "0.1.0"
-esp-hal = { version = "1.0.0-beta.1", features = ["esp32c6", "unstable"] }
-esp-hal-embassy = { version = "0.8.1", features = ["esp32c6"] }
-esp-println = { version = "0.14.0", default-features = false, features = [
+esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32c6"] }
+esp-hal = { version = "1.0.0", features = ["esp32c6", "unstable"] }
+esp-println = { version = "0.16.1", default-features = false, features = [
     "colors",
     "critical-section",
     "esp32c6",
     # Force JTAG output even if USB is not connected, otherwise it clobbers UART0.
     "jtag-serial",
 ] }
-esp-wifi = { version = "0.14.1", features = [
-    "builtin-scheduler",
+esp-radio = { version = "0.17.0", features = [
     "esp-alloc",
     "esp32c6",
+    "unstable",
     "wifi",
 ] }
+esp-rtos = { version = "0.2.0", features = ["esp32c6", "embassy", "esp-radio", "esp-alloc"] }
 
 const_format = { version = "0.2.34", features = ["rust_1_83", "fmt"] }
-esp-ds18b20 = { git = "https://github.com/abreis/esp-ds18b20", tag = "v0.9.0" }
-esp-onewire = { git = "https://github.com/abreis/esp-onewire", tag = "v0.9.0" }
+esp-ds18b20 = { git = "https://github.com/abreis/esp-ds18b20", tag = "v1.0.0" }
+esp-onewire = { git = "https://github.com/abreis/esp-onewire", tag = "v1.0.0" }
+# TODO bump to 0.9.1 when serde-json-core/#105 is merged
 heapless = "0.8.0"
+mountain-mqtt = { version = "0.2.0", features = ["embedded-io-async", "embedded-hal-async"], default-features = false }
 noline = { version = "0.5.1", features = ["alloc"] }
 picoserve = { version = "0.16.0", features = ["alloc", "embassy"] }
 pid = "4.0.0"
-
-mountain-mqtt = { path = "vendor/mountain-mqtt", default-features = false, features = [
-    "embedded-io-async",
-    "embedded-hal-async",
-] }
 serde-json-core = "0.6.0"
 serde = { version = "1.0.219", features = ["derive"], default-features = false }
 

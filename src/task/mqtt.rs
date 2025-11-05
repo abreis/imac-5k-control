@@ -392,8 +392,8 @@ impl<'h, const P: usize> EventHandler<P> for MqttHandler<'h> {
     }
 }
 
-fn find_user_property<'a, 'p, const N: usize>(
-    properties: &'a heapless::Vec<PublishProperty<'p>, N>,
+fn find_user_property<'p, const N: usize>(
+    properties: &heapless::Vec<PublishProperty<'p>, N>,
     name: &str,
     value: Option<&str>,
 ) -> Option<StringPair<'p>> {

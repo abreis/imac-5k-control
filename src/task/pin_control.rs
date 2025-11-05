@@ -13,6 +13,7 @@ pub type PinControlPubSub<const P: usize, const S: usize> =
 pub type PinControlPublisher = pubsub::DynPublisher<'static, PinControlMessage>;
 pub type PinControlSubscriber = pubsub::DynSubscriber<'static, PinControlMessage>;
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Copy, Clone, Serialize, Deserialize)]
 pub enum PinControlMessage {
     ButtonPower,

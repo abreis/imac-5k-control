@@ -52,7 +52,7 @@ pub fn init<const WATCHERS: usize>(
         .configure(ledc::channel::config::Config {
             timer: lstimer0,
             duty_pct: INITIAL_FAN_DUTY,
-            pin_config: ledc::channel::config::PinConfig::PushPull,
+            drive_mode: esp_hal::gpio::DriveMode::PushPull,
         })
         .unwrap();
 

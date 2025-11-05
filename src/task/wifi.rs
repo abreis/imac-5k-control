@@ -1,12 +1,8 @@
 use crate::memlog::SharedLogger;
 use alloc::{boxed::Box, format};
 use embassy_time::{Duration, Timer};
-use esp_hal::{peripherals, rng::Rng};
-use esp_wifi::{
-    EspWifiTimerSource,
-    config::PowerSaveMode,
-    wifi::{self, WifiState},
-};
+use esp_hal::peripherals;
+use esp_radio::wifi::{self, PowerSaveMode, WifiStaState};
 
 use crate::config::WIFI_PASS;
 use crate::config::WIFI_SSID;
@@ -20,25 +16,21 @@ const WIFI_RECONNECT_PAUSE: Duration = Duration::from_secs(5);
 ///
 /// Sets a hardcoded SSID and passphrase, and disables power save for performance.
 pub async fn init(
-    timer: impl EspWifiTimerSource + 'static,
-    radio_clocks: peripherals::RADIO_CLK<'static>,
     wifi: peripherals::WIFI<'static>,
-    rng: Rng,
 ) -> Result<(wifi::WifiController<'static>, wifi::Interfaces<'static>), wifi::WifiError> {
     // Allow some time before initializing the (power-hungry) WiFi.
     Timer::after(Duration::from_millis(250)).await;
 
-    let wifi_init =
-        Box::leak::<'static>(Box::new(esp_wifi::init(timer, rng, radio_clocks).unwrap()));
-    let (mut wifi_controller, wifi_interfaces) = esp_wifi::wifi::new(wifi_init, wifi).unwrap();
+    let radio_init = Box::leak::<'static>(Box::new(esp_radio::init().unwrap()));
+    let wifi_config = wifi::Config::default().with_country_code(wifi::CountryInfo::from(*b"NZ"));
+    let (mut wifi_controller, wifi_interfaces) =
+        esp_radio::wifi::new(radio_init, wifi, wifi_config).unwrap();
 
     // Set the wifi client configuration.
-    let wifi_client_config = wifi::ClientConfiguration {
-        ssid: WIFI_SSID.into(),
-        password: WIFI_PASS.into(),
-        ..Default::default()
-    };
-    wifi_controller.set_configuration(&wifi::Configuration::Client(wifi_client_config))?;
+    let wifi_client_config = wifi::ClientConfig::default()
+        .with_ssid(WIFI_SSID.into())
+        .with_password(WIFI_PASS.into());
+    wifi_controller.set_config(&wifi::ModeConfig::Client(wifi_client_config))?;
 
     // Disable power saving, can cause random packet delay and loss (#3014).
     wifi_controller.set_power_saving(PowerSaveMode::None)?;
@@ -53,7 +45,7 @@ pub async fn wifi_permanent_connection(
 ) {
     loop {
         // If we're still connected, wait until we disconnect.
-        if wifi::wifi_state() == WifiState::StaConnected {
+        if wifi::sta_state() == WifiStaState::Connected {
             controller
                 .wait_for_event(wifi::WifiEvent::StaDisconnected)
                 .await;

@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use embassy_net::{self as net};
 use esp_hal::rng::Rng;
-use esp_wifi::wifi;
+use esp_radio::wifi;
 
 /// Maximum number of sockets to allocate memory for.
 const NET_SOCKETS: usize = 3;
@@ -9,7 +9,7 @@ use crate::config::NET_CONFIG;
 
 pub async fn init(
     driver: wifi::WifiDevice<'static>,
-    mut rng: Rng,
+    rng: Rng,
 ) -> (
     net::Stack<'static>,
     net::Runner<'static, wifi::WifiDevice<'static>>,

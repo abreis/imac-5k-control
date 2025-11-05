@@ -23,7 +23,7 @@ pub fn init() -> BuzzerChannel {
 pub async fn buzzer_control(mut pin_buzzer: gpio::Output<'static>, buzzer_channel: BuzzerChannel) {
     // Queue a pattern on buzzer init.
     buzzer_channel
-        .send([BuzzerAction::Beep { ms: 100 }].as_ref().into())
+        .send([BuzzerAction::Beep { ms: 100 }].as_ref())
         .await;
 
     pin_buzzer.set_low();

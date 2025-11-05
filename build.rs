@@ -24,6 +24,20 @@ fn linker_be_nice() {
                     eprintln!("💡 Is the linker script `linkall.x` missing?");
                     eprintln!();
                 }
+                "esp_rtos_initialized" | "esp_rtos_yield_task" | "esp_rtos_task_create" => {
+                    eprintln!();
+                    eprintln!(
+                        "💡 `esp-radio` has no scheduler enabled. Make sure you have initialized `esp-rtos` or provided an external scheduler."
+                    );
+                    eprintln!();
+                }
+                "embedded_test_linker_file_not_added_to_rustflags" => {
+                    eprintln!();
+                    eprintln!(
+                        "💡 `embedded-test` not found - make sure `embedded-test.x` is added as a linker script for tests"
+                    );
+                    eprintln!();
+                }
                 _ => (),
             },
             // we don't have anything helpful for "missing-lib" yet

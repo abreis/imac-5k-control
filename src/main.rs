@@ -16,21 +16,22 @@ use embassy_executor::{SpawnError, Spawner};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio;
-use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::timer::timg::TimerGroup;
 
+// Default app-descriptor required by the esp-idf bootloader.
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(spawner: Spawner) {
     // let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
     let peripherals = esp_hal::init(esp_config);
     esp_alloc::heap_allocator!(size: 72 * 1024);
-    let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-    esp_hal_embassy::init(timer0.alarm0);
-    let rng = esp_hal::rng::Rng::new(peripherals.RNG);
-    let timer1 = TimerGroup::new(peripherals.TIMG0);
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    let sw_interrupt =
+        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
+    let rng = esp_hal::rng::Rng::new();
 
     //
     // C6-SuperMini pinout
@@ -97,10 +98,7 @@ async fn main(spawner: Spawner) {
     memlog.info("imac5k display controller initialized");
 
     // Set up the WiFi.
-    let (wifi_controller, wifi_interfaces) =
-        task::wifi::init(timer1.timer0, peripherals.RADIO_CLK, peripherals.WIFI, rng)
-            .await
-            .unwrap();
+    let (wifi_controller, wifi_interfaces) = task::wifi::init(peripherals.WIFI).await.unwrap();
 
     // Set up the network stack.
     let (net_stack, net_runner) = task::net::init(wifi_interfaces.sta, rng).await;

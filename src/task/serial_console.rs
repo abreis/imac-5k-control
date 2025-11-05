@@ -213,10 +213,10 @@ async fn cli_parser(
                     }
                     select::Either::Second(bytes_read) => {
                         // Accept a Ctrl-C or Ctrl-D to interrupt (ASCII End of Text, End of Transmission)
-                        if let Ok(1) = bytes_read {
-                            if (buf[0] == 0x03) | (buf[0] == 0x04) {
-                                break 'watch_loop;
-                            }
+                        if let Ok(1) = bytes_read
+                            && (buf[0] == 0x03) | (buf[0] == 0x04)
+                        {
+                            break 'watch_loop;
                         }
                     }
                 };
@@ -266,10 +266,10 @@ async fn cli_parser(
                     }
                     select::Either::Second(bytes_read) => {
                         // Accept a Ctrl-C or Ctrl-D to interrupt (ASCII End of Text, End of Transmission)
-                        if let Ok(1) = bytes_read {
-                            if (buf[0] == 0x03) | (buf[0] == 0x04) {
-                                break 'watch_loop;
-                            }
+                        if let Ok(1) = bytes_read
+                            && (buf[0] == 0x03) | (buf[0] == 0x04)
+                        {
+                            break 'watch_loop;
                         }
                     }
                 };
