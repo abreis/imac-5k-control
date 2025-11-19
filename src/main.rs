@@ -8,7 +8,6 @@
 extern crate alloc;
 
 mod config;
-mod futures;
 mod memlog;
 mod task;
 

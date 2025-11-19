@@ -1,5 +1,4 @@
 use crate::{
-    futures::{Either8, select8},
     memlog::SharedLogger,
     task::{
         fan_control::{FanDutyDynReceiver, FanTachyDynReceiver},
@@ -237,6 +236,7 @@ pub async fn run(
                     let net_fut = netstatus_receiver.changed();
                     let log_fut = logwatch_receiver.changed();
 
+                    embassy_infinite_futures::generate_select!(8);
                     match select8(
                         temp_fut,
                         fanduty_fut,
@@ -250,7 +250,7 @@ pub async fn run(
                     .await
                     {
                         // Publish temperature sensor readings.
-                        Either8::First(sensor_data) => {
+                        Either8::Future1(sensor_data) => {
                             if let Ok(temp) = sensor_data.temperature {
                                 mqtt_client
                                     .publish(
@@ -264,7 +264,7 @@ pub async fn run(
                         }
 
                         // Publish fan duty values.
-                        Either8::Second(duty) => {
+                        Either8::Future2(duty) => {
                             mqtt_client
                                 .publish(
                                     topic_display!("fan/duty"),
@@ -276,7 +276,7 @@ pub async fn run(
                         }
 
                         // Publish fan tachy readings.
-                        Either8::Third(rpms) => {
+                        Either8::Future3(rpms) => {
                             mqtt_client
                                 .publish(
                                     topic_display!("fan/tachy"),
@@ -288,7 +288,7 @@ pub async fn run(
                         }
 
                         // Publish pincontrol commands.
-                        Either8::Fourth(pincontrol) => {
+                        Either8::Future4(pincontrol) => {
                             if let WaitResult::Message(command) = pincontrol {
                                 let command =
                                     serde_json_core::to_string::<_, 128>(&command).unwrap();
@@ -304,7 +304,7 @@ pub async fn run(
                         }
 
                         // Publish network status updates.
-                        Either8::Fifth(net) => {
+                        Either8::Future5(net) => {
                             mqtt_client
                                 .publish(
                                     topic_display!("net"),
@@ -316,7 +316,7 @@ pub async fn run(
                         }
 
                         // Publish logs.
-                        Either8::Sixth(log) => {
+                        Either8::Future6(log) => {
                             mqtt_client
                                 .publish(
                                     topic_display!("log"),
@@ -328,13 +328,13 @@ pub async fn run(
                         }
 
                         // Periodically send a ping to the server.
-                        Either8::Seventh(_ping) => {
+                        Either8::Future7(_ping) => {
                             mqtt_client.send_ping().await?;
                             ping_fut = Timer::after_secs(10);
                         }
 
                         // Periodic poll for MQTT messages.
-                        Either8::Eighth(_trigger) => {
+                        Either8::Future8(_trigger) => {
                             mqtt_client.poll(false).await?;
                             poll_fut = Timer::after_secs(1);
                         }

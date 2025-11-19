@@ -62,6 +62,7 @@ picoserve = { version = "0.16.0", features = ["alloc", "embassy"] }
 pid = "4.0.0"
 serde-json-core = "0.6.0"
 serde = { version = "1.0.219", features = ["derive"], default-features = false }
+embassy-infinite-futures = { version = "1.0.0", path = "../embassy-infinite-futures" }
 
 [profile.dev]
 opt-level = "s"
