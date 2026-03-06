@@ -15,7 +15,7 @@ pub type FanDutyWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, u8, 
 pub type FanDutyDynSender = watch::DynSender<'static, u8>;
 pub type FanDutyDynReceiver = watch::DynReceiver<'static, u8>;
 
-// How often to measure the fan's tachometer.
+/// How often to measure the fan's tachometer.
 const FAN_TACHY_MEASURE_INTERVAL: Duration = Duration::from_secs(20);
 
 pub type FanTachyWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, u16, W>;
@@ -83,60 +83,62 @@ pub async fn fan_tachy(
         Timer::after(FAN_TACHY_MEASURE_INTERVAL).await;
 
         // Measure 10 pulses to get a good average.
-        const PULSES_TO_MEASURE: u32 = 10;
-        // 1/2 pulse width at 2200 rpms (2 pulses per revolution) is 6.2ms.
-        // Any less than that and the pulse is likely a glitch.
-        // 1/2 pulse width at 500 rpms (2 pulses per revolution) is 33ms.
-        // Any more than that and the fan is probably stopped.
-        const PULSE_MIN: Duration = Duration::from_millis(25);
-        const PULSE_MAX: Duration = Duration::from_millis(132);
+        const PULSES_TO_MEASURE: usize = 10;
+        // We measure full pulse periods (falling edge to falling edge), where:
+        // - 300 RPM -> 100ms period (2 pulses/rev)
+        // - 2400 RPM -> 12.5ms period
+        //
+        // Keep a bit of room around this expected operating range.
+        const PULSE_PERIOD_MIN: Duration = Duration::from_millis(10);
+        const PULSE_PERIOD_MAX: Duration = Duration::from_millis(120);
 
         enum PulseError {
             TooLong,
             TooShort,
         }
 
-        let pulse_widths: Result<[Duration; 10], PulseError> = async {
-            let mut pulse_widths: [Duration; 10] = [Duration::MIN; 10];
+        let pulse_periods: Result<[Duration; PULSES_TO_MEASURE], PulseError> = async {
+            let mut pulse_periods: [Duration; PULSES_TO_MEASURE] =
+                [Duration::MIN; PULSES_TO_MEASURE];
 
             // Measure 10 pulses.
-            for pulse_slot in pulse_widths.iter_mut() {
+            for pulse_slot in pulse_periods.iter_mut() {
                 // Wait for a falling edge.
-                with_timeout(PULSE_MAX, pin_fan_tachy.wait_for_falling_edge())
+                with_timeout(PULSE_PERIOD_MAX, pin_fan_tachy.wait_for_falling_edge())
                     .await
                     .map_err(|_| PulseError::TooLong)?;
                 let start_time = Instant::now();
 
-                // Wait for the rising edge.
-                with_timeout(PULSE_MAX, pin_fan_tachy.wait_for_rising_edge())
+                // Wait for the next falling edge to measure one full tach pulse period.
+                with_timeout(PULSE_PERIOD_MAX, pin_fan_tachy.wait_for_falling_edge())
                     .await
                     .map_err(|_| PulseError::TooLong)?;
 
                 let elapsed = start_time.elapsed();
-                if elapsed < PULSE_MIN {
+                if elapsed < PULSE_PERIOD_MIN {
                     return Err(PulseError::TooShort);
                 } else {
                     *pulse_slot = elapsed;
                 }
             }
 
-            Ok(pulse_widths)
+            Ok(pulse_periods)
         }
         .await;
 
-        let rpm = match pulse_widths {
+        let rpm = match pulse_periods {
             // A pulse measurement timed out, report a zero duty.
             Err(PulseError::TooLong) => 0,
-            // If pulse < PULSE_MIN, a zero duty might be wrong, should be no duty.
+            // Too-short periods are likely glitches or invalid edges.
             Err(PulseError::TooShort) => continue 'tachy,
 
-            Ok(widths) => {
+            Ok(periods) => {
                 // Average the durations.
-                let duration_total_us = widths.iter().map(Duration::as_micros).sum::<u64>();
-                let duration_avg_us = duration_total_us / 10;
+                let duration_total_us = periods.iter().map(Duration::as_micros).sum::<u64>();
+                let duration_avg_us = duration_total_us / PULSES_TO_MEASURE as u64;
 
-                // From a falling to a rising edge is 1/4 of the revolution length.
-                60_000_000 / (duration_avg_us * 4)
+                // 2 pulses/revolution: RPM = 60s / (period * 2).
+                60_000_000 / (duration_avg_us * 2)
             }
         };
 

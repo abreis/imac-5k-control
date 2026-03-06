@@ -9,7 +9,6 @@ use crate::{
 };
 use alloc::{format, string::ToString};
 use const_format::concatcp;
-use core::fmt::Display;
 use embassy_net::{IpEndpoint, dns::DnsQueryType, tcp::TcpSocket};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Timer};
@@ -32,42 +31,18 @@ const MQTT_SERVER_ADDR: &str = "broker.abu";
 const MQTT_PORT: u16 = 1883;
 const MQTT_TIMEOUT_MS: u32 = 5000;
 const MQTT_PROPERTIES: usize = 16;
-const MQTT_DISPLAY_TOPIC_ROOT: &str = "devices/display";
+const MQTT_TOPIC_ROOT: &str = "devices/display";
 use crate::config::MQTT_CLIENT_ID;
 use crate::config::MQTT_TOPIC_DEVICE_NAME;
 
-macro_rules! topic_display {
+macro_rules! mqtt_topic {
     ($TAIL:expr) => {
-        concatcp!(
-            MQTT_DISPLAY_TOPIC_ROOT,
-            '/',
-            MQTT_TOPIC_DEVICE_NAME,
-            '/',
-            $TAIL
-        )
+        concatcp!(MQTT_TOPIC_ROOT, '/', MQTT_TOPIC_DEVICE_NAME, '/', $TAIL)
     };
 }
 
-//
-// Inter-task communication.
-//
-
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-pub enum MqttStatus {
-    #[default]
-    Disconnected,
-    Connecting,
-    Connected,
-}
-impl Display for MqttStatus {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            MqttStatus::Disconnected => write!(f, "disconnected"),
-            MqttStatus::Connecting => write!(f, "connecting"),
-            MqttStatus::Connected => write!(f, "connected"),
-        }
-    }
-}
+/// Topics to subscribe to when connected.
+const SUBSCRIBE_TOPICS: &[&str] = &[mqtt_topic!("control/set")];
 
 //
 // Broker connection.
@@ -118,7 +93,7 @@ async fn connect_to_broker<'a>(
     let will = Will::new(
         QualityOfService::Qos1,
         true,
-        topic_display!("status"),
+        mqtt_topic!("status"),
         "offline".as_bytes(),
         heapless::Vec::<_, 0>::new(),
     );
@@ -179,6 +154,7 @@ pub async fn run(
             .await
         {
             memlog.warn(format!("tcp socket failed to connect to broker: {error:?}"));
+            continue 'connect;
         }
 
         let catch: Result<_, ClientError> = async {
@@ -193,7 +169,7 @@ pub async fn run(
             // Publish an 'online' status.
             mqtt_client
                 .publish(
-                    topic_display!("status"),
+                    mqtt_topic!("status"),
                     "online".as_bytes(),
                     QualityOfService::Qos1,
                     true,
@@ -213,6 +189,20 @@ pub async fn run(
                 continue 'connect;
             }
         };
+
+        // Subscribe to topics.
+        memlog.info("mqtt: subscribing to topics");
+        for sub_topic in SUBSCRIBE_TOPICS {
+            if mqtt_client
+                .subscribe(sub_topic, QualityOfService::Qos1)
+                .await
+                .is_err()
+            {
+                // Something went wrong, retry the connection.
+                Timer::after_secs(10).await;
+                continue 'connect;
+            }
+        }
 
         // Connected.
         memlog.info("mqtt: connected");
@@ -254,7 +244,7 @@ pub async fn run(
                             if let Ok(temp) = sensor_data.temperature {
                                 mqtt_client
                                     .publish(
-                                        topic_display!("temp"),
+                                        mqtt_topic!("temp"),
                                         temp.to_string().as_bytes(),
                                         QualityOfService::Qos0,
                                         false,
@@ -267,7 +257,7 @@ pub async fn run(
                         Either8::Future2(duty) => {
                             mqtt_client
                                 .publish(
-                                    topic_display!("fan/duty"),
+                                    mqtt_topic!("fan/duty"),
                                     duty.to_string().as_bytes(),
                                     QualityOfService::Qos0,
                                     false,
@@ -279,7 +269,7 @@ pub async fn run(
                         Either8::Future3(rpms) => {
                             mqtt_client
                                 .publish(
-                                    topic_display!("fan/tachy"),
+                                    mqtt_topic!("fan/tachy"),
                                     rpms.to_string().as_bytes(),
                                     QualityOfService::Qos0,
                                     false,
@@ -294,7 +284,7 @@ pub async fn run(
                                     serde_json_core::to_string::<_, 128>(&command).unwrap();
                                 mqtt_client
                                     .publish(
-                                        topic_display!("control"),
+                                        mqtt_topic!("control"),
                                         command.as_bytes(),
                                         QualityOfService::Qos0,
                                         false,
@@ -307,7 +297,7 @@ pub async fn run(
                         Either8::Future5(net) => {
                             mqtt_client
                                 .publish(
-                                    topic_display!("net"),
+                                    mqtt_topic!("net"),
                                     format!("{net:?}").as_bytes(),
                                     QualityOfService::Qos0,
                                     false,
@@ -319,7 +309,7 @@ pub async fn run(
                         Either8::Future6(log) => {
                             mqtt_client
                                 .publish(
-                                    topic_display!("log"),
+                                    mqtt_topic!("log"),
                                     format!("{log}").as_bytes(),
                                     QualityOfService::Qos0,
                                     false,
@@ -330,7 +320,7 @@ pub async fn run(
                         // Periodically send a ping to the server.
                         Either8::Future7(_ping) => {
                             mqtt_client.send_ping().await?;
-                            ping_fut = Timer::after_secs(10);
+                            ping_fut = Timer::after(MQTT_PING_INTERVAL);
                         }
 
                         // Periodic poll for MQTT messages.
@@ -373,25 +363,27 @@ impl<'h, const P: usize> EventHandler<P> for MqttHandler<'h> {
         };
 
         // Receive pincontrol commands on devices/display/<id>/control/set
-        if message.topic_name.eq(topic_display!("control/set")) {
+        if message.topic_name.eq(mqtt_topic!("control/set")) {
             match serde_json_core::from_slice::<PinControlMessage>(message.payload) {
                 Ok((command, _remainder)) => self.pincontrol_publisher.publish(command).await,
                 Err(error) => self
                     .memlog
                     .warn(format!("failed to deserialize pin command: {error}")),
             }
+
+            Ok(())
+        } else {
+            // Unrecognized topics.
+            // Note: we deliberately do not error on an unexpected topic.
+            self.memlog
+                .warn(format!("unexpected topic: {}", message.topic_name));
+
+            Ok(())
         }
-
-        // Unrecognized topics.
-        self.memlog
-            .warn(format!("unexpected topic: {}", message.topic_name));
-
-        // Note: we deliberately do not error on an unexpected topic.
-
-        Ok(())
     }
 }
 
+#[allow(dead_code)]
 fn find_user_property<'p, const N: usize>(
     properties: &heapless::Vec<PublishProperty<'p>, N>,
     name: &str,

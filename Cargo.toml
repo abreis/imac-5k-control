@@ -1,7 +1,7 @@
 [package]
 edition = "2024"
 name = "imac-5k-control"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Andre Braga Reis <andre@saltwing.com>"]
 publish = false
 
@@ -18,7 +18,7 @@ embassy-embedded-hal = "0.5.0"
 # Enabling nightly statically allocates the tasks, no arena is used.
 embassy-executor = { version = "0.9.1", features = ["nightly"] }
 embassy-futures = "0.1.1"
-embassy-net = { version = "0.7.1", features = [
+embassy-net = { version = "0.8.0", features = [
     "dhcpv4",
     "medium-ethernet",
     "tcp",
@@ -51,18 +51,25 @@ esp-radio = { version = "0.17.0", features = [
 ] }
 esp-rtos = { version = "0.2.0", features = ["esp32c6", "embassy", "esp-radio", "esp-alloc"] }
 
+##
 const_format = { version = "0.2.34", features = ["rust_1_83", "fmt"] }
-esp-ds18b20 = { git = "https://github.com/abreis/esp-ds18b20", tag = "v1.0.0" }
-esp-onewire = { git = "https://github.com/abreis/esp-onewire", tag = "v1.0.0" }
-# TODO bump to 0.9.1 when serde-json-core/#105 is merged
-heapless = "0.8.0"
-mountain-mqtt = { version = "0.2.0", features = ["embedded-io-async", "embedded-hal-async"], default-features = false }
+esp-ds18b20 = { git = "https://code.saltwing.com/abreis/esp-ds18b20.git", tag = "v1.0.0" }
+esp-onewire = { git = "https://code.saltwing.com/abreis/esp-onewire.git", tag = "v1.0.0" }
+# Note: can't bump to 0.9 before serde-json-core, mountain-mqtt, esp-net upgrade too
+heapless = "0.8"
+# Note: v0.3.0 is available but not published on crates.io
+# mountain-mqtt = { version = "0.2.0", features = ["embedded-io-async", "embedded-hal-async"], default-features = false }
+mountain-mqtt = { path = "./vendor/mountain-mqtt/mountain-mqtt", features = ["embedded-io-async", "embedded-hal-async"], default-features = false }
 noline = { version = "0.5.1", features = ["alloc"] }
-picoserve = { version = "0.16.0", features = ["alloc", "embassy"] }
+picoserve = { version = "0.18.0", features = ["alloc", "embassy"] }
 pid = "4.0.0"
 serde-json-core = "0.6.0"
-serde = { version = "1.0.219", features = ["derive"], default-features = false }
-embassy-infinite-futures = { version = "1.0.0", path = "../embassy-infinite-futures" }
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
+embassy-infinite-futures = { git = "https://code.saltwing.com/abreis/embassy-infinite-futures.git", tag = "v1.0.0"}
+
+# Direct the esp-onewire dependency on esp-ds18b20 to our local gitlab
+[patch."https://github.com/abreis/esp-onewire"]
+esp-onewire = { git = "https://code.saltwing.com/abreis/esp-onewire.git", tag = "v1.0.0" }
 
 [profile.dev]
 opt-level = "s"
