@@ -26,6 +26,8 @@ async fn main(spawner: Spawner) {
     let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
     let peripherals = esp_hal::init(esp_config);
     esp_alloc::heap_allocator!(size: 128 * 1024);
+    // TODO we should find out the real size of this section
+    // esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 64*1024);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_interrupt =
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
@@ -38,13 +40,27 @@ async fn main(spawner: Spawner) {
     // A default output config with a 5mA drive strength.
     let output_5ma = gpio::OutputConfig::default().with_drive_strength(gpio::DriveStrength::_5mA);
     // Unused pins, taken here so they aren't used accidentally.
+    // let _pin1_unused = peripherals.GPIO1;
+    // let _pin2_unused = peripherals.GPIO2;
+    // let _pin3_unused = peripherals.GPIO3;
+    // let _pin4_unused = peripherals.GPIO4;
+    // let _pin5_unused = peripherals.GPIO5;
+    // let _pin6_unused = peripherals.GPIO6;
+    // let _pin7_unused = peripherals.GPIO7;
     let _pin8_unused = peripherals.GPIO8;
     let _pin9_unused = peripherals.GPIO9;
+    let _pin10_unused = peripherals.GPIO10;
+    let _pin11_unused = peripherals.GPIO11;
     let _pin12_unused = peripherals.GPIO12;
     let _pin13_unused = peripherals.GPIO13;
+    // let _pin14_unused = peripherals.GPIO14;
     let _pin15_unused = peripherals.GPIO15;
-    let _pin15_unused = peripherals.GPIO18;
-    // let _pin21_unused = peripherals.GPIO21;
+    // let _pin16_unused = peripherals.GPIO16;
+    // let _pin17_unused = peripherals.GPIO17;
+    let _pin18_unused = peripherals.GPIO18;
+    let _pin19_unused = peripherals.GPIO19;
+    // let _pin20_unused = peripherals.GPIO20;
+    let _pin21_unused = peripherals.GPIO21;
     // let _pin22_unused = peripherals.GPIO22;
     let _pin23_unused = peripherals.GPIO23;
     // UART pins.
@@ -76,14 +92,14 @@ async fn main(spawner: Spawner) {
     // G19 reads the tachometer in the case fan.
     // The fan has an open-collector output, so we need a pull-up here.
     let pin_fan_tachy = gpio::Input::new(
-        peripherals.GPIO19,
-        gpio::InputConfig::default().with_pull(gpio::Pull::Up),
+        peripherals.GPIO22,
+        gpio::InputConfig::default().with_pull(gpio::Pull::None),
     );
     // G20 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
     let pin_fan_pwm = gpio::Output::new(peripherals.GPIO20, gpio::Level::High, output_5ma);
     // G21 and G22 track the status LEDs on the display board.
-    let _pin_display_led_red = gpio::Input::new(peripherals.GPIO21, gpio::InputConfig::default());
-    let _pin_display_led_green = gpio::Input::new(peripherals.GPIO22, gpio::InputConfig::default());
+    // let _pin_display_led_red = gpio::Input::new(peripherals.GPIO21, gpio::InputConfig::default());
+    // let _pin_display_led_green = gpio::Input::new(peripherals.GPIO22, gpio::InputConfig::default());
     // G14 controls the buzzer.
     let pin_buzzer = gpio::Output::new(
         peripherals.GPIO14,
@@ -107,9 +123,6 @@ async fn main(spawner: Spawner) {
 
     // Get a shareable channel to send buzzer control messages.
     let buzzer_channel = task::buzzer::init();
-
-    //
-    // Watcher count: 1 for serial console, 1 for httpd.
 
     // Init the fan duty PWM controller.
     let (pwm_channel, fanduty_watch, fantachy_watch) =

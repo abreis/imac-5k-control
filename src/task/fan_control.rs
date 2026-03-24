@@ -16,7 +16,7 @@ pub type FanDutyDynSender = watch::DynSender<'static, u8>;
 pub type FanDutyDynReceiver = watch::DynReceiver<'static, u8>;
 
 /// How often to measure the fan's tachometer.
-const FAN_TACHY_MEASURE_INTERVAL: Duration = Duration::from_secs(20);
+const FAN_TACHY_MEASURE_INTERVAL: Duration = Duration::from_secs(10);
 
 pub type FanTachyWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, u16, W>;
 pub type FanTachyDynSender = watch::DynSender<'static, u16>;
@@ -79,68 +79,83 @@ pub async fn fan_tachy(
     mut pin_fan_tachy: gpio::Input<'static>,
     fantachy_sender: FanTachyDynSender,
 ) {
+    // We measure full pulse periods (falling edge to falling edge), where:
+    // - 300 RPM -> 100ms period (2 pulses/rev)
+    // - 2400 RPM -> 12.5ms period
+    //
+    // Keep some room around expected operating range.
+    const PULSE_PERIOD_MIN_US: u32 = 10_000; // 10ms
+    const PULSE_PERIOD_MAX_US: u32 = 120_000; // 120ms
+    const PULSE_PERIOD_MAX: Duration = Duration::from_micros(PULSE_PERIOD_MAX_US as u64);
+
+    // Require at least this many valid (falling->falling) periods.
+    const MIN_VALID_PERIODS: u32 = 10;
+
+    // Capture falling edges for a fixed window.
+    const CAPTURE_WINDOW: Duration = Duration::from_millis(1200);
+
+    // Reject any falling edges that happen too soon after the previously accepted
+    // falling edge. This filters short low glitches without depending on seeing
+    // the corresponding rising edge.
+    const GLITCH_DEADTIME_US: u32 = 1_500;
+
     'tachy: loop {
         Timer::after(FAN_TACHY_MEASURE_INTERVAL).await;
 
-        // Measure 10 pulses to get a good average.
-        const PULSES_TO_MEASURE: usize = 10;
-        // We measure full pulse periods (falling edge to falling edge), where:
-        // - 300 RPM -> 100ms period (2 pulses/rev)
-        // - 2400 RPM -> 12.5ms period
-        //
-        // Keep a bit of room around this expected operating range.
-        const PULSE_PERIOD_MIN: Duration = Duration::from_millis(10);
-        const PULSE_PERIOD_MAX: Duration = Duration::from_millis(120);
-
-        enum PulseError {
-            TooLong,
-            TooShort,
+        // Synchronize on a first falling edge. If none appears in time, fan is likely stopped.
+        if with_timeout(PULSE_PERIOD_MAX, pin_fan_tachy.wait_for_falling_edge())
+            .await
+            .is_err()
+        {
+            fantachy_sender.send(0);
+            continue 'tachy;
         }
 
-        let pulse_periods: Result<[Duration; PULSES_TO_MEASURE], PulseError> = async {
-            let mut pulse_periods: [Duration; PULSES_TO_MEASURE] =
-                [Duration::MIN; PULSES_TO_MEASURE];
+        let capture_start = Instant::now();
+        let mut last_accepted_falling_us: u32 = 0;
+        let mut period_sum_us: u64 = 0;
+        let mut valid_periods: u32 = 0;
 
-            // Measure 10 pulses.
-            for pulse_slot in pulse_periods.iter_mut() {
-                // Wait for a falling edge.
-                with_timeout(PULSE_PERIOD_MAX, pin_fan_tachy.wait_for_falling_edge())
-                    .await
-                    .map_err(|_| PulseError::TooLong)?;
-                let start_time = Instant::now();
+        while capture_start.elapsed() < CAPTURE_WINDOW {
+            let elapsed = capture_start.elapsed();
+            let remaining = CAPTURE_WINDOW - elapsed;
 
-                // Wait for the next falling edge to measure one full tach pulse period.
-                with_timeout(PULSE_PERIOD_MAX, pin_fan_tachy.wait_for_falling_edge())
-                    .await
-                    .map_err(|_| PulseError::TooLong)?;
-
-                let elapsed = start_time.elapsed();
-                if elapsed < PULSE_PERIOD_MIN {
-                    return Err(PulseError::TooShort);
-                } else {
-                    *pulse_slot = elapsed;
-                }
+            if with_timeout(remaining, pin_fan_tachy.wait_for_falling_edge())
+                .await
+                .is_err()
+            {
+                break;
             }
 
-            Ok(pulse_periods)
+            let now_us = capture_start.elapsed().as_micros() as u32;
+            let period_us = now_us.saturating_sub(last_accepted_falling_us);
+
+            // Glitch rejection: ignore unnaturally short intervals.
+            if period_us < GLITCH_DEADTIME_US {
+                continue;
+            }
+
+            // Outside plausible fan period range. Re-sync on very long gaps.
+            if period_us < PULSE_PERIOD_MIN_US {
+                continue;
+            }
+            if period_us > PULSE_PERIOD_MAX_US {
+                last_accepted_falling_us = now_us;
+                continue;
+            }
+
+            period_sum_us += period_us as u64;
+            valid_periods += 1;
+            last_accepted_falling_us = now_us;
         }
-        .await;
 
-        let rpm = match pulse_periods {
-            // A pulse measurement timed out, report a zero duty.
-            Err(PulseError::TooLong) => 0,
-            // Too-short periods are likely glitches or invalid edges.
-            Err(PulseError::TooShort) => continue 'tachy,
+        if valid_periods < MIN_VALID_PERIODS {
+            continue 'tachy;
+        }
 
-            Ok(periods) => {
-                // Average the durations.
-                let duration_total_us = periods.iter().map(Duration::as_micros).sum::<u64>();
-                let duration_avg_us = duration_total_us / PULSES_TO_MEASURE as u64;
-
-                // 2 pulses/revolution: RPM = 60s / (period * 2).
-                60_000_000 / (duration_avg_us * 2)
-            }
-        };
+        let duration_avg_us = period_sum_us / valid_periods as u64;
+        // 2 pulses/revolution: RPM = 60s / (period * 2).
+        let rpm = 60_000_000 / (duration_avg_us * 2);
 
         fantachy_sender.send(rpm as u16);
     }
