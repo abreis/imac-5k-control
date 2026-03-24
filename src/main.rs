@@ -25,9 +25,16 @@ async fn main(spawner: Spawner) {
     // let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let esp_config = esp_hal::Config::default().with_cpu_clock(CpuClock::_160MHz);
     let peripherals = esp_hal::init(esp_config);
+
+    // Heap allocation. ESP32C6 has 512KB SRAM for its high-speed core.
+    // - 64 KiB reclaimed only: safest if heap demand is low
+    // - 64 KiB reclaimed + 96 KiB regular: very safe
+    // - 64 KiB reclaimed + 128 KiB regular: still comfortable
+    // - 64 KiB reclaimed + 160 KiB regular: probably still fine, but we would measure first
+    // To measure, print `esp_alloc::HEAP.stats()` after boot and again after Wi‑Fi + MQTT are connected.
+    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
     esp_alloc::heap_allocator!(size: 128 * 1024);
-    // TODO we should find out the real size of this section
-    // esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 64*1024);
+
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_interrupt =
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
@@ -35,77 +42,58 @@ async fn main(spawner: Spawner) {
     let rng = esp_hal::rng::Rng::new();
 
     //
-    // C6-SuperMini pinout
+    // XIAO ESP32C6 pinout
     //
     // A default output config with a 5mA drive strength.
     let output_5ma = gpio::OutputConfig::default().with_drive_strength(gpio::DriveStrength::_5mA);
-    // Unused pins, taken here so they aren't used accidentally.
-    // let _pin1_unused = peripherals.GPIO1;
-    // let _pin2_unused = peripherals.GPIO2;
-    // let _pin3_unused = peripherals.GPIO3;
-    // let _pin4_unused = peripherals.GPIO4;
-    // let _pin5_unused = peripherals.GPIO5;
-    // let _pin6_unused = peripherals.GPIO6;
-    // let _pin7_unused = peripherals.GPIO7;
+    // G0 sends a PWM signal to the fan. A high signal corresponds to 100% duty cycle.
+    let pin_fan_pwm = gpio::Output::new(peripherals.GPIO0, gpio::Level::High, output_5ma);
+    // G1 reads the fan tachometer. The external pull-up and RC filter are on the board.
+    let pin_fan_tachy = gpio::Input::new(
+        peripherals.GPIO1,
+        gpio::InputConfig::default().with_pull(gpio::Pull::None),
+    );
+    // G2 is the 1Wire bus commanding the DS18B20 temperature sensors, which are phantom-powered.
+    let pin_sensor_display_temp = peripherals.GPIO2;
+    // G3 is an internal antenna-control pin routed via G14.
+    let _pin_internal_antenna_control = peripherals.GPIO3;
+    // G4-G13 are currently unused. Take ownership so they aren't used accidentally.
+    let _pin4_unused = peripherals.GPIO4;
+    let _pin5_unused = peripherals.GPIO5;
+    let _pin6_unused = peripherals.GPIO6;
+    let _pin7_unused = peripherals.GPIO7;
     let _pin8_unused = peripherals.GPIO8;
     let _pin9_unused = peripherals.GPIO9;
     let _pin10_unused = peripherals.GPIO10;
     let _pin11_unused = peripherals.GPIO11;
     let _pin12_unused = peripherals.GPIO12;
     let _pin13_unused = peripherals.GPIO13;
-    // let _pin14_unused = peripherals.GPIO14;
+    // G14 must be held high to enable the external antenna.
+    let _pin_external_antenna_enable =
+        gpio::Output::new(peripherals.GPIO14, gpio::Level::High, output_5ma);
+    // G15 is currently unused.
     let _pin15_unused = peripherals.GPIO15;
-    // let _pin16_unused = peripherals.GPIO16;
-    // let _pin17_unused = peripherals.GPIO17;
-    let _pin18_unused = peripherals.GPIO18;
-    let _pin19_unused = peripherals.GPIO19;
-    // let _pin20_unused = peripherals.GPIO20;
-    let _pin21_unused = peripherals.GPIO21;
-    // let _pin22_unused = peripherals.GPIO22;
-    let _pin23_unused = peripherals.GPIO23;
     // UART pins.
     let pin_uart_tx = peripherals.GPIO16;
     let pin_uart_rx = peripherals.GPIO17;
-    // G1 triggers the controller power button on level:high (pulls to low via nMOS).
-    let pin_button_power = gpio::Output::new(peripherals.GPIO1, gpio::Level::Low, output_5ma);
-    // G5, G4, G3, G2 trigger controller buttons on level:low.
-    // These pins are IE (Input Enabled) at and after reset.
-    // Voltage from controller board is ~3.3v. Pins need to be Open-Drain.
-    let output_opendrain = gpio::OutputConfig::default()
-        .with_drive_mode(gpio::DriveMode::OpenDrain)
-        .with_pull(gpio::Pull::None)
-        .with_drive_strength(gpio::DriveStrength::_5mA);
-    let pin_button_menu = gpio::Output::new(peripherals.GPIO5, gpio::Level::High, output_opendrain);
-    let pin_button_back = gpio::Output::new(peripherals.GPIO4, gpio::Level::High, output_opendrain);
-    let pin_button_down = gpio::Output::new(peripherals.GPIO3, gpio::Level::High, output_opendrain);
-    let pin_button_up = gpio::Output::new(peripherals.GPIO2, gpio::Level::High, output_opendrain);
-    // G0 reads the case button, which pulls the line to GND when pressed.
-    let pin_button_case = peripherals.GPIO0;
-    // G6 is the 1Wire bus commanding the DS18B20 temperature sensors, which are phantom-powered.
-    let pin_sensor_display_temp = peripherals.GPIO6;
-    // G18 goes to the Power MOSFET gate that switches 24VDC power on to the display controller.
-    // IRLZ44N I_gate = 48nC * 1Hz = 48nA (current depends on switching frequency)
-    // let pin_power_display = gpio::Output::new(peripherals.GPIO18, gpio::Level::Low, output_5ma);
-    // G7 goes to the nMOS gate that switches 12VDC power on to the case fan.
-    // Fan defaults to On.
-    let _pin_power_fan = gpio::Output::new(peripherals.GPIO7, gpio::Level::High, output_5ma);
-    // G19 reads the tachometer in the case fan.
-    // The fan has an open-collector output, so we need a pull-up here.
-    let pin_fan_tachy = gpio::Input::new(
-        peripherals.GPIO22,
-        gpio::InputConfig::default().with_pull(gpio::Pull::None),
-    );
-    // G20 sends a PWM signal to the fans. A high signal corresponds to 100% duty cycle.
-    let pin_fan_pwm = gpio::Output::new(peripherals.GPIO20, gpio::Level::High, output_5ma);
-    // G21 and G22 track the status LEDs on the display board.
-    // let _pin_display_led_red = gpio::Input::new(peripherals.GPIO21, gpio::InputConfig::default());
-    // let _pin_display_led_green = gpio::Input::new(peripherals.GPIO22, gpio::InputConfig::default());
-    // G14 controls the buzzer.
+    // G18 drives the low-side MOSFET for the 24V relay coil. A dedicated module will own this later.
+    let _pin_power_display_relay =
+        gpio::Output::new(peripherals.GPIO18, gpio::Level::Low, output_5ma);
+    // G19 controls the buzzer.
     let pin_buzzer = gpio::Output::new(
-        peripherals.GPIO14,
+        peripherals.GPIO19,
         gpio::Level::Low,
         gpio::OutputConfig::default().with_drive_strength(gpio::DriveStrength::_5mA),
     );
+    // G20 reads the case button, which pulls the line to GND when pressed.
+    let pin_button_case = peripherals.GPIO20;
+    // G21 is the MCP23009 interrupt pin. We will poll initially, but reserve it now.
+    let _pin_io_expander_int = gpio::Input::new(peripherals.GPIO21, gpio::InputConfig::default());
+    // G22/G23 carry the MCP23009 I2C bus.
+    let _pin_i2c_sda = peripherals.GPIO22;
+    let _pin_i2c_scl = peripherals.GPIO23;
+    // Display-board buttons and LEDs now live behind the MCP23009:
+    // GP0 green LED, GP1 red LED, GP2 power, GP3 up, GP4 down, GP5 enter, GP6 menu.
 
     // Initialize an in-memory logger with space for 480 characters.
     let memlog = memlog::init(480);
@@ -155,16 +143,6 @@ async fn main(spawner: Spawner) {
 
         // Monitor the network stack for changes.
         spawner.spawn(task::net_monitor(net_stack, netstatus_watch.dyn_sender()))?;
-
-        // Control the buttons on the display board.
-        spawner.spawn(task::pin_control(
-            pin_button_power,
-            pin_button_menu,
-            pin_button_back,
-            pin_button_down,
-            pin_button_up,
-            pincontrol_pubsub.dyn_subscriber().unwrap(),
-        ))?;
 
         // Launch a control interface on UART0.
         spawner.spawn(task::serial_console(
