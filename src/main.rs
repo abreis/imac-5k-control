@@ -8,6 +8,7 @@
 extern crate alloc;
 
 mod config;
+mod mcp23009;
 mod memlog;
 mod task;
 
