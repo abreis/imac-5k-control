@@ -41,11 +41,19 @@ async fn main(spawner: Spawner) {
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
     let rng = esp_hal::rng::Rng::new();
 
+    // Initialize an in-memory logger with space for 480 characters.
+    let memlog = memlog::init(480);
+    memlog.enable_print();
+    memlog.info("[init] imac5k display controller");
+    memlog.info("[init] hardware initialized");
+
     //
     // XIAO ESP32C6 pinout
     //
+
     // A default output config with a 5mA drive strength.
     let output_5ma = gpio::OutputConfig::default().with_drive_strength(gpio::DriveStrength::_5mA);
+
     // G0 sends a PWM signal to the fan. A high signal corresponds to 100% duty cycle.
     let pin_fan_pwm = gpio::Output::new(peripherals.GPIO0, gpio::Level::High, output_5ma);
     // G1 reads the fan tachometer. The external pull-up and RC filter are on the board.
@@ -55,9 +63,9 @@ async fn main(spawner: Spawner) {
     );
     // G2 is the 1Wire bus commanding the DS18B20 temperature sensors, which are phantom-powered.
     let pin_sensor_display_temp = peripherals.GPIO2;
-    // G3 is an internal antenna-control pin routed via G14.
-    let _pin_internal_antenna_control = peripherals.GPIO3;
-    // G4-G13 are currently unused. Take ownership so they aren't used accidentally.
+    // G3+G14 drive the RF switch. Hold G3 low to enable switch control and G14 low to select
+    // the onboard antenna (high would select the external U.FL antenna).
+    let _pin_rf_switch_ctrl = gpio::Output::new(peripherals.GPIO3, gpio::Level::Low, output_5ma);
     let _pin4_unused = peripherals.GPIO4;
     let _pin5_unused = peripherals.GPIO5;
     let _pin6_unused = peripherals.GPIO6;
@@ -68,10 +76,8 @@ async fn main(spawner: Spawner) {
     let _pin11_unused = peripherals.GPIO11;
     let _pin12_unused = peripherals.GPIO12;
     let _pin13_unused = peripherals.GPIO13;
-    // G14 must be held high to enable the external antenna.
-    let _pin_external_antenna_enable =
-        gpio::Output::new(peripherals.GPIO14, gpio::Level::High, output_5ma);
-    // G15 is currently unused.
+    // Antenna selection (see G3).
+    let _pin_antenna_sel = gpio::Output::new(peripherals.GPIO14, gpio::Level::Low, output_5ma);
     let _pin15_unused = peripherals.GPIO15;
     // UART pins.
     let pin_uart_tx = peripherals.GPIO16;
@@ -92,13 +98,14 @@ async fn main(spawner: Spawner) {
     // G22/G23 carry the MCP23009 I2C bus.
     let _pin_i2c_sda = peripherals.GPIO22;
     let _pin_i2c_scl = peripherals.GPIO23;
-    // Display-board buttons and LEDs now live behind the MCP23009:
+    // Display-board buttons and LEDs live behind the MCP23009.
     // GP0 green LED, GP1 red LED, GP2 power, GP3 up, GP4 down, GP5 enter, GP6 menu.
 
-    // Initialize an in-memory logger with space for 480 characters.
-    let memlog = memlog::init(480);
-    memlog.enable_print();
-    memlog.info("imac5k display controller initialized");
+    memlog.info("[init] board pinout configured");
+
+    //
+    // Task initialization.
+    //
 
     // Set up the WiFi.
     let (wifi_controller, wifi_interfaces) = task::wifi::init(peripherals.WIFI).await.unwrap();
@@ -128,6 +135,8 @@ async fn main(spawner: Spawner) {
     // // Set up the internal temperature sensor.
     // let _onboard_sensor =
     //     tsens::TemperatureSensor::new(peripherals.TSENS, tsens::Config::default()).unwrap();
+
+    memlog.info("[init] tasks initialized");
 
     //
     // Spawn tasks.
@@ -211,4 +220,6 @@ async fn main(spawner: Spawner) {
         Ok(())
     }()
     .unwrap();
+
+    memlog.info("[init] tasks spawned");
 }
