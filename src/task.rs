@@ -6,7 +6,6 @@ pub mod net;
 pub mod net_monitor;
 pub mod pin_control;
 pub mod power_relay;
-pub mod serial_console;
 pub mod temp_sensor;
 pub mod wifi;
 
@@ -18,5 +17,4 @@ pub use fan_control::fan_temp_control;
 pub use net_monitor::net_monitor;
 pub use pin_control::pin_control;
 pub use power_relay::power_relay;
-pub use serial_console::serial_console;
 pub use temp_sensor::temp_sensor;

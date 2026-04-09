@@ -156,19 +156,6 @@ async fn main(spawner: Spawner) {
         // Monitor the network stack for changes.
         spawner.spawn(task::net_monitor(net_stack, netstatus_watch.dyn_sender()))?;
 
-        // Launch a control interface on UART0.
-        spawner.spawn(task::serial_console(
-            peripherals.UART0.into(),
-            pin_uart_rx.into(),
-            pin_uart_tx.into(),
-            pincontrol_pubsub.dyn_publisher().unwrap(),
-            fanduty_watch.dyn_sender(),
-            fanduty_watch.dyn_receiver().unwrap(),
-            netstatus_watch.dyn_receiver().unwrap(),
-            tempsensor_watch.dyn_receiver().unwrap(),
-            memlog,
-        ))?;
-
         // Operate the display-controller power relay.
         spawner.spawn(task::power_relay(
             pin_power_display_relay,
