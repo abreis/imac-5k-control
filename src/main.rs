@@ -76,8 +76,8 @@ async fn main(spawner: Spawner) {
     // UART pins.
     let pin_uart_tx = peripherals.GPIO16;
     let pin_uart_rx = peripherals.GPIO17;
-    // G18 drives the low-side MOSFET for the 24V relay coil. A dedicated module will own this later.
-    let _pin_power_display_relay =
+    // G18 drives the low-side MOSFET for the 24V relay coil feeding the display controller board.
+    let pin_power_display_relay =
         gpio::Output::new(peripherals.GPIO18, gpio::Level::Low, output_5ma);
     // G19 controls the buzzer.
     let pin_buzzer = gpio::Output::new(
@@ -122,6 +122,9 @@ async fn main(spawner: Spawner) {
     // Get a watcher to monitor the network interface.
     let netstatus_watch = task::net_monitor::init::<2>();
 
+    // Get a command channel and state watcher for the display-controller power relay.
+    let (powerrelay_channel, powerrelay_watch) = task::power_relay::init::<4, 3>();
+
     // // Set up the internal temperature sensor.
     // let _onboard_sensor =
     //     tsens::TemperatureSensor::new(peripherals.TSENS, tsens::Config::default()).unwrap();
@@ -155,6 +158,13 @@ async fn main(spawner: Spawner) {
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
+        ))?;
+
+        // Operate the display-controller power relay.
+        spawner.spawn(task::power_relay(
+            pin_power_display_relay,
+            powerrelay_channel.dyn_receiver(),
+            powerrelay_watch.dyn_sender(),
         ))?;
 
         // Watch the case button for presses.
