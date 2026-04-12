@@ -8,15 +8,19 @@
 extern crate alloc;
 
 mod config;
-mod mcp23009;
+mod driver;
+mod ioexpander;
 mod memlog;
 mod task;
 
+use crate::ioexpander::IoExpander;
 use embassy_executor::{SpawnError, Spawner};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio;
+use esp_hal::i2c::master::I2c;
+use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{gpio, i2c};
 
 // Default app-descriptor required by the esp-idf bootloader.
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -97,8 +101,8 @@ async fn main(spawner: Spawner) {
     // G21 is the MCP23009 interrupt pin. We will poll initially, but reserve it now.
     let _pin_io_expander_int = gpio::Input::new(peripherals.GPIO21, gpio::InputConfig::default());
     // G22/G23 carry the MCP23009 I2C bus.
-    let _pin_i2c_sda = peripherals.GPIO22;
-    let _pin_i2c_scl = peripherals.GPIO23;
+    let pin_i2c_sda = peripherals.GPIO22;
+    let pin_i2c_scl = peripherals.GPIO23;
     // Display-board buttons and LEDs live behind the MCP23009.
     // GP0 green LED, GP1 red LED, GP2 power, GP3 up, GP4 down, GP5 enter, GP6 menu.
 
@@ -108,17 +112,28 @@ async fn main(spawner: Spawner) {
     // Task initialization.
     //
 
+    // Initialize the I2C bus.
+    let i2c_config = i2c::master::Config::default().with_frequency(Rate::from_khz(400));
+    let i2c_master = I2c::new(peripherals.I2C0, i2c_config)
+        .unwrap()
+        .with_sda(pin_i2c_sda)
+        .with_scl(pin_i2c_scl);
+
+    // Initialize the IO expander.
+    let mcp23009 = driver::mcp23009::Mcp23009::new(i2c_master);
+    let ioexpander = IoExpander::init(mcp23009).unwrap();
+
     // Set up the WiFi.
     let (wifi_controller, wifi_interfaces) = task::wifi::init(peripherals.WIFI).await.unwrap();
 
     // Set up the network stack.
     let (net_stack, net_runner) = task::net::init(wifi_interfaces.sta, rng).await;
 
-    // Get a shareable channel to send messages to the pincontrol task.
-    let pincontrol_pubsub = task::pin_control::init::<3, 2>();
-
     // Get a shareable channel to send buzzer control messages.
     let buzzer_channel = task::buzzer::init();
+
+    // Get a shareable channel to send messages to the pincontrol task.
+    let (pincontrol_pubsub, displayled_watch) = task::pin_control::init::<3, 2, 3>();
 
     // Init the fan duty PWM controller.
     let (pwm_channel, fanduty_watch, fantachy_watch) =
@@ -144,6 +159,15 @@ async fn main(spawner: Spawner) {
     || -> Result<(), SpawnError> {
         // Run the buzzer controller.
         spawner.spawn(task::buzzer_control(pin_buzzer, buzzer_channel))?;
+
+        // Control the display-board buttons behind the MCP23009 and watch the board LEDs.
+        spawner.spawn(task::pin_control(
+            ioexpander,
+            pincontrol_pubsub.dyn_subscriber().unwrap(),
+            displayled_watch.dyn_sender(),
+            buzzer_channel,
+            memlog,
+        ))?;
 
         // Keep the wifi connected.
         spawner.spawn(task::wifi::wifi_permanent_connection(

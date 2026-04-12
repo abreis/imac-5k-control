@@ -41,6 +41,15 @@ pub enum Pin {
     Gp7 = 7,
 }
 
+/// Pin direction.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Direction {
+    /// Configure as input.
+    Input,
+    /// Configure as output.
+    Output,
+}
+
 /// Pin logic level.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Level {
@@ -48,6 +57,11 @@ pub enum Level {
     Low,
     /// Logic high.
     High,
+}
+impl Into<bool> for Level {
+    fn into(self) -> bool {
+        self == Self::High
+    }
 }
 
 /// Open-drain output state.
@@ -113,10 +127,9 @@ enum Register {
     Olat = 0x0A,
 }
 
+// Public interface.
 impl<'d> Mcp23009<'d> {
     pub const DEFAULT_ADDRESS: u8 = 0x20;
-    const MIN_ADDRESS: u8 = 0x20;
-    const MAX_ADDRESS: u8 = 0x27;
 
     /// Creates a driver using the default I2C address.
     pub fn new(i2c: I2c<'d, Blocking>) -> Self {
@@ -159,31 +172,59 @@ impl<'d> Mcp23009<'d> {
         Ok(())
     }
 
-    /// Configures a pin as an input.
-    pub fn set_input(&mut self, pin: Pin) -> Result<(), Error> {
-        self.write_bit(Register::Iodir, pin, true)
-    }
-
-    /// Configures a pin as an output with the given initial open-drain state.
-    pub fn set_output(&mut self, pin: Pin, initial: OutputState) -> Result<(), Error> {
-        self.write_bit(Register::Olat, pin, initial == OutputState::Released)?;
-        self.write_bit(Register::Iodir, pin, false)
-    }
-
     /// Reads the current logic level on a pin.
-    pub fn read_pin(&mut self, pin: Pin) -> Result<Level, Error> {
-        let level = if self.read_bit(Register::Gpio, pin)? {
-            Level::High
+    pub fn read_level(&mut self, pin: Pin) -> Result<Level, Error> {
+        if self.read_bit(Register::Gpio, pin)? {
+            Ok(Level::High)
         } else {
-            Level::Low
-        };
+            Ok(Level::Low)
+        }
+    }
 
-        Ok(level)
+    /// Reads the current logic levels for all pins.
+    ///
+    /// Index 0 maps to GP0 and index 7 maps to GP7.
+    pub fn read_levels(&mut self) -> Result<[Level; 8], Error> {
+        let gpio = self.read_register(Register::Gpio)?;
+        let levels = core::array::from_fn(|index| {
+            if gpio & (1 << index) != 0 {
+                Level::High
+            } else {
+                Level::Low
+            }
+        });
+
+        Ok(levels)
+    }
+
+    /// Configures a pin direction.
+    pub fn set_direction(&mut self, pin: Pin, direction: Direction) -> Result<(), Error> {
+        self.write_bit(Register::Iodir, pin, direction == Direction::Input)
+    }
+
+    /// Configures all pin directions in one register write.
+    ///
+    /// Index 0 maps to GP0 and index 7 maps to GP7.
+    pub fn set_directions(&mut self, directions: [Direction; 8]) -> Result<(), Error> {
+        self.write_register(
+            Register::Iodir,
+            Self::pack_bits(directions, |dir| dir == Direction::Input),
+        )
     }
 
     /// Updates the output latch for a pin.
-    pub fn write_output(&mut self, pin: Pin, state: OutputState) -> Result<(), Error> {
+    pub fn set_output(&mut self, pin: Pin, state: OutputState) -> Result<(), Error> {
         self.write_bit(Register::Olat, pin, state == OutputState::Released)
+    }
+
+    /// Updates the output latch for all pins in one register write.
+    ///
+    /// Index 0 maps to GP0 and index 7 maps to GP7.
+    pub fn set_outputs(&mut self, states: [OutputState; 8]) -> Result<(), Error> {
+        self.write_register(
+            Register::Olat,
+            Self::pack_bits(states, |state| state == OutputState::Released),
+        )
     }
 
     /// Enables or disables the internal pull-up on a pin.
@@ -191,10 +232,36 @@ impl<'d> Mcp23009<'d> {
         self.write_bit(Register::Gppu, pin, pull_up == PullUp::Enabled)
     }
 
+    /// Enables or disables the internal pull-up on all pins in one register write.
+    ///
+    /// Index 0 maps to GP0 and index 7 maps to GP7.
+    pub fn set_pull_ups(&mut self, pull_ups: [PullUp; 8]) -> Result<(), Error> {
+        self.write_register(
+            Register::Gppu,
+            Self::pack_bits(pull_ups, |pull_up| pull_up == PullUp::Enabled),
+        )
+    }
+
     /// Enables or disables interrupt generation for a pin.
     pub fn set_interrupt(&mut self, pin: Pin, enabled: InterruptEnable) -> Result<(), Error> {
         self.write_bit(Register::Gpinten, pin, enabled == InterruptEnable::Enabled)
     }
+
+    /// Enables or disables interrupts on all pins in one register write.
+    ///
+    /// Index 0 maps to GP0 and index 7 maps to GP7.
+    pub fn set_interrupts(&mut self, enabled: [InterruptEnable; 8]) -> Result<(), Error> {
+        self.write_register(
+            Register::Gpinten,
+            Self::pack_bits(enabled, |state| state == InterruptEnable::Enabled),
+        )
+    }
+}
+
+// Internals.
+impl<'d> Mcp23009<'d> {
+    const MIN_ADDRESS: u8 = 0x20;
+    const MAX_ADDRESS: u8 = 0x27;
 
     fn validate_address(address: u8) -> Result<(), Error> {
         if (Self::MIN_ADDRESS..=Self::MAX_ADDRESS).contains(&address) {
@@ -234,5 +301,15 @@ impl<'d> Mcp23009<'d> {
             value &= !mask;
         }
         self.write_register(register, value)
+    }
+
+    fn pack_bits<T>(values: [T; 8], is_set: impl Fn(T) -> bool) -> u8 {
+        values
+            .into_iter()
+            .enumerate()
+            .fold(0, |mask, (index, value)| match is_set(value) {
+                true => mask | (1 << index),
+                false => mask,
+            })
     }
 }
