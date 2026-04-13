@@ -126,7 +126,7 @@ async fn main(spawner: Spawner) {
     let (wifi_controller, wifi_interfaces) = task::wifi::init(peripherals.WIFI).await.unwrap();
 
     // Set up the network stack.
-    let (net_stack, net_runner) = task::net::init(wifi_interfaces.sta, rng).await;
+    let (net_stack, net_runner) = task::net::init(wifi_interfaces.station, rng).await;
 
     // Get a shareable channel to send buzzer control messages.
     let buzzer_channel = task::buzzer::init();

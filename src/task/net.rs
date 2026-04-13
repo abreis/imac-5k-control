@@ -8,11 +8,11 @@ const NET_SOCKETS: usize = 3;
 use crate::config::NET_CONFIG;
 
 pub async fn init(
-    driver: wifi::WifiDevice<'static>,
+    driver: wifi::Interface<'static>,
     rng: Rng,
 ) -> (
     net::Stack<'static>,
-    net::Runner<'static, wifi::WifiDevice<'static>>,
+    net::Runner<'static, wifi::Interface<'static>>,
 ) {
     // Memory resources for the network stack.
     let net_resources = Box::leak::<'static>(Box::new(net::StackResources::<NET_SOCKETS>::new()));
@@ -25,6 +25,6 @@ pub async fn init(
 
 /// Drives the network stack.
 #[embassy_executor::task]
-pub async fn stack_runner(mut runner: net::Runner<'static, wifi::WifiDevice<'static>>) {
+pub async fn stack_runner(mut runner: net::Runner<'static, wifi::Interface<'static>>) {
     runner.run().await
 }

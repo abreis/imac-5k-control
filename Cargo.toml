@@ -28,14 +28,29 @@ embassy-net = { version = "0.8.0", features = [
 ] }
 embassy-sync = "0.7.0"
 embassy-time = "0.5.0"
-esp-alloc = "0.9.0"
+
+
+# esp-alloc = "0.9.0"
+# esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32c6"] }
+# esp-hal = { version = "1.0.0", features = ["esp32c6", "unstable"] }
+# esp-radio = { version = "0.17.0", features = [ "esp-alloc", "esp32c6", "unstable", "wifi"] }
+# esp-rtos = { version = "0.2.0", features = ["esp32c6", "embassy", "esp-radio", "esp-alloc"] }
+
+# [Jan 28] · e7b663a · Make sure .flash_desc and .rodata are merged by the tooling (#4844)
+# [Feb  6] · 187a78d · Fix some UART-related issues (#4586) (#4852)
+# [Feb 17] · 747aa89 · Place SPI and UART async interrupt handlers into RAM (#4988)
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "747aa89" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "747aa89", features = ["esp32c6"] }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "747aa89", features = ["esp32c6", "unstable"] }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "747aa89", features = [ "esp-alloc", "esp32c6", "unstable", "wifi"] }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "747aa89", features = ["esp32c6", "embassy", "esp-radio", "esp-alloc"] }
+
+
 esp-backtrace = { version = "0.18.1", features = [
     "esp32c6",
     "panic-handler",
     "println",
 ] }
-esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32c6"] }
-esp-hal = { version = "1.0.0", features = ["esp32c6", "unstable"] }
 esp-println = { version = "0.16.1", default-features = false, features = [
     "colors",
     "critical-section",
@@ -43,18 +58,14 @@ esp-println = { version = "0.16.1", default-features = false, features = [
     # Force JTAG output even if USB is not connected, otherwise it clobbers UART0.
     "jtag-serial",
 ] }
-esp-radio = { version = "0.17.0", features = [
-    "esp-alloc",
-    "esp32c6",
-    "unstable",
-    "wifi",
-] }
-esp-rtos = { version = "0.2.0", features = ["esp32c6", "embassy", "esp-radio", "esp-alloc"] }
 
 ##
 const_format = { version = "0.2.34", features = ["rust_1_83", "fmt"] }
-esp-ds18b20 = { git = "https://code.saltwing.com/abreis/esp-ds18b20.git", tag = "v1.0.0" }
-esp-onewire = { git = "https://code.saltwing.com/abreis/esp-onewire.git", tag = "v1.0.0" }
+# esp-ds18b20 = { git = "https://code.saltwing.com/abreis/esp-ds18b20.git", tag = "v1.0.0" }
+# esp-onewire = { git = "https://code.saltwing.com/abreis/esp-onewire.git", tag = "v1.0.0" }
+esp-ds18b20 = { path = "vendor/esp-ds18b20" }
+esp-onewire = { path = "vendor/esp-onewire" }
+
 # Note: can't bump to 0.9 before serde-json-core, mountain-mqtt, esp-net upgrade too
 heapless = "0.8"
 # Note: v0.3.0 is available but not published on crates.io
@@ -73,8 +84,8 @@ ratatui-widgets = { version = "0.3.0", default-features = false }
 ratatui-serial = { git = "https://code.saltwing.com/abreis/ratatui-serial.git", tag = "v0.4.1" }
 
 # Direct the esp-onewire dependency on esp-ds18b20 to our local gitlab
-[patch."https://github.com/abreis/esp-onewire"]
-esp-onewire = { git = "https://code.saltwing.com/abreis/esp-onewire.git", tag = "v1.0.0" }
+# [patch."https://github.com/abreis/esp-onewire"]
+# esp-onewire = { git = "https://code.saltwing.com/abreis/esp-onewire.git", tag = "v1.0.0" }
 
 [profile.dev]
 opt-level = "s"

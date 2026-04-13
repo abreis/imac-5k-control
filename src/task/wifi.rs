@@ -1,8 +1,9 @@
 use crate::memlog::SharedLogger;
-use alloc::{boxed::Box, format};
+use alloc::format;
+use alloc::string::ToString;
 use embassy_time::{Duration, Timer};
 use esp_hal::peripherals;
-use esp_radio::wifi::{self, PowerSaveMode, WifiStaState};
+use esp_radio::wifi::{self, Config, ControllerConfig, PowerSaveMode, sta::StationConfig};
 
 use crate::config::WIFI_PASS;
 use crate::config::WIFI_SSID;
@@ -21,16 +22,15 @@ pub async fn init(
     // Allow some time before initializing the (power-hungry) WiFi.
     Timer::after(Duration::from_millis(250)).await;
 
-    let radio_init = Box::leak::<'static>(Box::new(esp_radio::init().unwrap()));
-    let wifi_config = wifi::Config::default().with_country_code(wifi::CountryInfo::from(*b"NZ"));
-    let (mut wifi_controller, wifi_interfaces) =
-        esp_radio::wifi::new(radio_init, wifi, wifi_config).unwrap();
+    let wifi_config =
+        ControllerConfig::default().with_country_code(wifi::CountryInfo::from(*b"NZ"));
+    let (mut wifi_controller, wifi_interfaces) = esp_radio::wifi::new(wifi, wifi_config).unwrap();
 
     // Set the wifi client configuration.
-    let wifi_client_config = wifi::ClientConfig::default()
-        .with_ssid(WIFI_SSID.into())
-        .with_password(WIFI_PASS.into());
-    wifi_controller.set_config(&wifi::ModeConfig::Client(wifi_client_config))?;
+    let wifi_client_config = StationConfig::default()
+        .with_ssid(WIFI_SSID)
+        .with_password(WIFI_PASS.to_string());
+    wifi_controller.set_config(&Config::Station(wifi_client_config))?;
 
     // Disable power saving, can cause random packet delay and loss (#3014).
     wifi_controller.set_power_saving(PowerSaveMode::None)?;
@@ -45,23 +45,21 @@ pub async fn wifi_permanent_connection(
 ) {
     loop {
         // If we're still connected, wait until we disconnect.
-        if wifi::sta_state() == WifiStaState::Connected {
-            controller
-                .wait_for_event(wifi::WifiEvent::StaDisconnected)
-                .await;
+        if controller.is_connected() {
+            let _ = controller.wait_for_disconnect_async().await;
         }
 
         // Pause before attempting to reconnect.
         Timer::after(WIFI_RECONNECT_PAUSE).await;
 
         // Start the WiFi controller if necessary.
-        if !matches!(controller.is_started(), Ok(true)) {
+        if !controller.is_started() {
             memlog.info("wifi: starting controller");
             controller.start_async().await.unwrap();
         }
 
         match controller.connect_async().await {
-            Ok(()) => memlog.info("wifi: connected"),
+            Ok(_info) => memlog.info("wifi: connected"),
             Err(error) => memlog.debug(format!("wifi: connect error: {:?}", error)),
         }
     }
