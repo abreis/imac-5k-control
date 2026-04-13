@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use alloc::boxed::Box;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel, watch};
 use esp_hal::gpio;

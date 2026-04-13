@@ -14,6 +14,7 @@
 //!
 //! Call [`Mcp23009::init`] before normal use to restore a known baseline
 //! configuration.
+#![allow(dead_code)]
 
 use esp_hal::{
     Blocking,

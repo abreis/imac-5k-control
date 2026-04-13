@@ -68,6 +68,9 @@ serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 embassy-infinite-futures = { git = "https://code.saltwing.com/abreis/embassy-infinite-futures.git", tag = "v1.0.0"}
 # for the mcp23009 driver only
 thiserror = { version = "2.0.18", default-features = false }
+ratatui-core = { version = "0.1.0", default-features = false }
+ratatui-widgets = { version = "0.3.0", default-features = false }
+ratatui-serial = { git = "https://code.saltwing.com/abreis/ratatui-serial.git", tag = "v0.4.1" }
 
 # Direct the esp-onewire dependency on esp-ds18b20 to our local gitlab
 [patch."https://github.com/abreis/esp-onewire"]

@@ -8,8 +8,8 @@ const NET_MONITOR_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkStatus {
-    link_up: bool,
-    ip_config: Option<embassy_net::StaticConfigV4>,
+    pub link_up: bool,
+    pub ip_config: Option<embassy_net::StaticConfigV4>,
 }
 
 pub type NetStatusWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, NetworkStatus, W>;

@@ -6,6 +6,7 @@ pub mod net;
 pub mod net_monitor;
 pub mod pin_control;
 pub mod power_relay;
+pub mod serial_tui;
 pub mod temp_sensor;
 pub mod wifi;
 

@@ -3,7 +3,6 @@
 #![deny(clippy::mem_forget)]
 #![feature(impl_trait_in_assoc_type)]
 #![allow(clippy::too_many_arguments)]
-#![allow(dead_code)]
 
 extern crate alloc;
 
@@ -148,6 +147,9 @@ async fn main(spawner: Spawner) {
     // Get a command channel and state watcher for the display-controller power relay.
     let (powerrelay_channel, powerrelay_watch) = task::power_relay::init::<4, 3>();
 
+    // WRITEME
+    let (control_signal, event_channel) = task::serial_tui::init();
+
     // // Set up the internal temperature sensor.
     // let _onboard_sensor =
     //     tsens::TemperatureSensor::new(peripherals.TSENS, tsens::Config::default()).unwrap();
@@ -227,6 +229,30 @@ async fn main(spawner: Spawner) {
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
+        ))?;
+
+        // Launch the UART interface event stream.
+        spawner.spawn(task::serial_tui::tui_event_stream(
+            displayled_watch.dyn_receiver().unwrap(),
+            fanduty_watch.dyn_receiver().unwrap(),
+            fantachy_watch.dyn_receiver().unwrap(),
+            netstatus_watch.dyn_receiver().unwrap(),
+            tempsensor_watch.dyn_receiver().unwrap(),
+            memlog,
+            control_signal,
+            event_channel,
+        ))?;
+
+        // Launch the UART control interface.
+        spawner.spawn(task::serial_tui::run(
+            peripherals.UART0.into(),
+            pin_uart_rx.into(),
+            pin_uart_tx.into(),
+            pincontrol_pubsub.dyn_publisher().unwrap(),
+            fanduty_watch.dyn_sender(),
+            memlog,
+            control_signal,
+            event_channel,
         ))?;
 
         Ok(())

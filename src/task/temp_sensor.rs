@@ -16,6 +16,7 @@ pub fn init<const WATCHERS: usize>() -> TempSensorWatch<WATCHERS> {
 
 #[derive(Copy, Clone, Debug)]
 pub struct TemperatureReading {
+    #[allow(dead_code)]
     pub timestamp: Instant,
     pub temperature: Result<f32, Ds18b20Error>,
     pub retries: u8,
