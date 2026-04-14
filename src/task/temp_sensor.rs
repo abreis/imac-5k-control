@@ -22,7 +22,9 @@ pub struct TemperatureReading {
     pub retries: u8,
 }
 
-const DSPL_TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
+// const DSPL_TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
+const DSPL_TEMP_SENSOR_ADDRESS: u64 = 0x60D7DB490B646128;
+
 // How long to wait between temperature readings.
 const TEMP_MEASUREMENT_INTERVAL: Duration = Duration::from_secs(5);
 // How many attempts to retry reading after a checksum error.

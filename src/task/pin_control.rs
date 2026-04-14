@@ -144,7 +144,7 @@ pub async fn pin_control(
             (Err(error), false) => {
                 fault_active = true;
                 buzzer_channel.send(ERROR_PATTERN).await;
-                memlog.warn(format!("mcp23009 fault: {error}"));
+                memlog.warn(format!("pinctl: mcp23009 fault: {error}"));
 
                 let _ = ioexpander.configure();
             }

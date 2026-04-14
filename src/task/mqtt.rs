@@ -153,7 +153,7 @@ pub async fn run(
             .connect(IpEndpoint::new(broker_addr, MQTT_PORT))
             .await
         {
-            memlog.warn(format!("tcp socket failed to connect to broker: {error:?}"));
+            memlog.warn(format!("mqtt: failed to connect to broker: {error:?}"));
             continue 'connect;
         }
 
@@ -184,7 +184,7 @@ pub async fn run(
             Ok(client) => client,
             Err(error) => {
                 // Something went wrong, pause and retry the connection steps.
-                memlog.warn(format!("failed to initialize mqtt: {error}"));
+                memlog.warn(format!("mqtt: failed to initialize: {error}"));
                 Timer::after_secs(10).await;
                 continue 'connect;
             }
@@ -335,11 +335,11 @@ pub async fn run(
 
             match catch {
                 Err(ClientError::Disconnected(reason)) => {
-                    memlog.info(format!("mqtt client disconnected: {reason}"));
+                    memlog.info(format!("mqtt: client disconnected: {reason}"));
                     continue 'connect;
                 }
                 Err(error) => {
-                    memlog.info(format!("mqtt client error: {error}"));
+                    memlog.info(format!("mqtt: client error: {error}"));
                     continue 'main;
                 }
                 Ok(()) => (),

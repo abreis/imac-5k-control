@@ -48,8 +48,8 @@ async fn main(spawner: Spawner) {
     // Initialize an in-memory logger with space for 480 characters.
     let memlog = memlog::init(480);
     memlog.enable_print();
-    memlog.info("[init] imac5k display controller");
-    memlog.info("[init] hardware initialized");
+    memlog.info("init: imac5k display controller");
+    memlog.info("init: hardware initialized");
 
     //
     // XIAO ESP32C6 pinout
@@ -105,7 +105,7 @@ async fn main(spawner: Spawner) {
     // Display-board buttons and LEDs live behind the MCP23009.
     // GP0 green LED, GP1 red LED, GP2 power, GP3 up, GP4 down, GP5 enter, GP6 menu.
 
-    memlog.info("[init] board pinout configured");
+    memlog.info("init: board pinout configured");
 
     //
     // Task initialization.
@@ -131,6 +131,9 @@ async fn main(spawner: Spawner) {
     // Get a shareable channel to send buzzer control messages.
     let buzzer_channel = task::buzzer::init();
 
+    // Get a watch to know when the case button has been pressed.
+    let casebutton_watch = task::case_button::init::<2>();
+
     // Get a shareable channel to send messages to the pincontrol task.
     let (pincontrol_pubsub, displayled_watch) = task::pin_control::init::<3, 2, 3>();
 
@@ -154,7 +157,7 @@ async fn main(spawner: Spawner) {
     // let _onboard_sensor =
     //     tsens::TemperatureSensor::new(peripherals.TSENS, tsens::Config::default()).unwrap();
 
-    memlog.info("[init] tasks initialized");
+    memlog.info("init: tasks initialized");
 
     //
     // Spawn tasks.
@@ -193,6 +196,7 @@ async fn main(spawner: Spawner) {
         // Watch the case button for presses.
         spawner.spawn(task::case_button(
             pin_button_case.into(),
+            casebutton_watch.dyn_sender(),
             pincontrol_pubsub.dyn_publisher().unwrap(),
             buzzer_channel,
             memlog,
@@ -237,6 +241,7 @@ async fn main(spawner: Spawner) {
             fanduty_watch.dyn_receiver().unwrap(),
             fantachy_watch.dyn_receiver().unwrap(),
             netstatus_watch.dyn_receiver().unwrap(),
+            powerrelay_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
             memlog,
             control_signal,
@@ -250,6 +255,7 @@ async fn main(spawner: Spawner) {
             pin_uart_tx.into(),
             pincontrol_pubsub.dyn_publisher().unwrap(),
             fanduty_watch.dyn_sender(),
+            powerrelay_channel.dyn_sender(),
             memlog,
             control_signal,
             event_channel,
@@ -259,5 +265,5 @@ async fn main(spawner: Spawner) {
     }()
     .unwrap();
 
-    memlog.info("[init] tasks spawned");
+    memlog.info("init: tasks spawned");
 }
