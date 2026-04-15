@@ -11,7 +11,7 @@ use embassy_futures::select::{Either3, select3};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DisplayBoardState {
+pub enum DisplayBoard {
     Unknown,
     DcPowerOff,
     BoardOff,
@@ -20,36 +20,40 @@ pub enum DisplayBoardState {
     RelayLatchedFault,
 }
 
-pub type DisplayBoardWatch<const W: usize> =
-    &'static watch::Watch<NoopRawMutex, DisplayBoardState, W>;
-pub type DisplayBoardDynSender = watch::DynSender<'static, DisplayBoardState>;
-pub type DisplayBoardDynReceiver = watch::DynReceiver<'static, DisplayBoardState>;
+pub type DisplayBoardWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, DisplayBoard, W>;
+pub type DisplayBoardDynSender = watch::DynSender<'static, DisplayBoard>;
+pub type DisplayBoardDynReceiver = watch::DynReceiver<'static, DisplayBoard>;
 
 pub fn init<const WATCHERS: usize>() -> DisplayBoardWatch<WATCHERS> {
     Box::leak(Box::new(watch::Watch::new()))
 }
 
-fn derive_state(relay_state: PowerRelay, led_state: LedState) -> DisplayBoardState {
+fn derive_state(relay_state: PowerRelay, led_state: LedState) -> DisplayBoard {
     match relay_state {
-        PowerRelay::ForcedOpen => DisplayBoardState::RelayLatchedFault,
-        PowerRelay::Open => DisplayBoardState::DcPowerOff,
+        PowerRelay::ForcedOpen => DisplayBoard::RelayLatchedFault,
+
+        PowerRelay::Open => DisplayBoard::DcPowerOff,
+
         PowerRelay::Closed => match led_state {
             LedState {
                 red: false,
                 green: false,
-            } => DisplayBoardState::BoardOff,
+            } => DisplayBoard::BoardOff,
+
             LedState {
                 red: true,
                 green: false,
-            } => DisplayBoardState::Standby,
+            } => DisplayBoard::Standby,
+
             LedState {
                 red: false,
                 green: true,
-            } => DisplayBoardState::Active,
+            } => DisplayBoard::Active,
+
             LedState {
                 red: true,
                 green: true,
-            } => DisplayBoardState::Unknown,
+            } => DisplayBoard::Unknown,
         },
     }
 }
@@ -64,13 +68,15 @@ pub async fn display_board(
     displayboard_sender: DisplayBoardDynSender,
     memlog: SharedLogger,
 ) {
-    let _ = &pincontrol_publisher;
-    let _ = &powerrelay_sender;
+    let _ = &pincontrol_publisher; // TODO
+    let _ = &powerrelay_sender; // TODO
 
+    // Wait for initial values of the relay and the board LEDs to arrive.
     let mut relay_state = powerrelay_receiver.get().await;
     let mut led_state = displayled_receiver.get().await;
-    let mut display_state = derive_state(relay_state, led_state);
 
+    // Initial display state.
+    let mut display_state = derive_state(relay_state, led_state);
     displayboard_sender.send(display_state);
     memlog.info(format!("display: state -> {display_state:?}"));
 
@@ -82,48 +88,16 @@ pub async fn display_board(
         )
         .await
         {
-            Either3::First(case_button) => match (case_button, display_state) {
-                (CaseButton::ShortPress, DisplayBoardState::Unknown) => {
-                    memlog.info("display: placeholder short press in Unknown")
-                }
-                (CaseButton::ShortPress, DisplayBoardState::DcPowerOff) => {
-                    memlog.info("display: placeholder short press in DcPowerOff")
-                }
-                (CaseButton::ShortPress, DisplayBoardState::BoardOff) => {
-                    memlog.info("display: placeholder short press in BoardOff")
-                }
-                (CaseButton::ShortPress, DisplayBoardState::Standby) => {
-                    memlog.info("display: placeholder short press in Standby")
-                }
-                (CaseButton::ShortPress, DisplayBoardState::Active) => {
-                    memlog.info("display: placeholder short press in Active")
-                }
-                (CaseButton::ShortPress, DisplayBoardState::RelayLatchedFault) => {
-                    memlog.info("display: placeholder short press in RelayLatchedFault")
-                }
-                (CaseButton::LongPress, DisplayBoardState::Unknown) => {
-                    memlog.info("display: placeholder long press in Unknown")
-                }
-                (CaseButton::LongPress, DisplayBoardState::DcPowerOff) => {
-                    memlog.info("display: placeholder long press in DcPowerOff")
-                }
-                (CaseButton::LongPress, DisplayBoardState::BoardOff) => {
-                    memlog.info("display: placeholder long press in BoardOff")
-                }
-                (CaseButton::LongPress, DisplayBoardState::Standby) => {
-                    memlog.info("display: placeholder long press in Standby")
-                }
-                (CaseButton::LongPress, DisplayBoardState::Active) => {
-                    memlog.info("display: placeholder long press in Active")
-                }
-                (CaseButton::LongPress, DisplayBoardState::RelayLatchedFault) => {
-                    memlog.info("display: placeholder long press in RelayLatchedFault")
-                }
-            },
+            Either3::First(case_button) => {
+                // TODO match (case_button, display_state)
+            }
 
+            //
+            // Update state based on board LEDs.
             Either3::Second(new_led_state) => {
                 led_state = new_led_state;
                 let new_display_state = derive_state(relay_state, led_state);
+
                 if display_state != new_display_state {
                     display_state = new_display_state;
                     displayboard_sender.send(display_state);
@@ -131,9 +105,12 @@ pub async fn display_board(
                 }
             }
 
+            //
+            // Update state based on our power relay.
             Either3::Third(new_relay_state) => {
                 relay_state = new_relay_state;
                 let new_display_state = derive_state(relay_state, led_state);
+
                 if display_state != new_display_state {
                     display_state = new_display_state;
                     displayboard_sender.send(display_state);

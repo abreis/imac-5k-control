@@ -1,5 +1,5 @@
 use super::{
-    display_board::{DisplayBoardDynReceiver, DisplayBoardState},
+    display_board::{DisplayBoardDynReceiver, DisplayBoard},
     fan_control::{FanDutyDynReceiver, FanDutyDynSender, FanTachyDynReceiver},
     net_monitor::{NetStatusDynReceiver, NetworkStatus},
     pin_control::{DisplayLedDynReceiver, LedState, PinControlMessage, PinControlPublisher},
@@ -58,7 +58,7 @@ pub enum Event {
     Net(NetworkStatus),
     Relay(PowerRelay),
     Temperature(TemperatureReading),
-    DisplayBoard(DisplayBoardState),
+    DisplayBoard(DisplayBoard),
     LogsSnapshot(Vec<Record>),
     TimedOut,
 }
