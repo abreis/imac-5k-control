@@ -8,9 +8,9 @@ pub type PowerRelayChannel<const N: usize> =
 pub type PowerRelayDynSender = channel::DynamicSender<'static, PowerRelayCommand>;
 pub type PowerRelayDynReceiver = channel::DynamicReceiver<'static, PowerRelayCommand>;
 
-pub type PowerRelayWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, PowerRelayState, W>;
-pub type PowerRelayStateDynSender = watch::DynSender<'static, PowerRelayState>;
-pub type PowerRelayStateDynReceiver = watch::DynReceiver<'static, PowerRelayState>;
+pub type PowerRelayWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, PowerRelay, W>;
+pub type PowerRelayStateDynSender = watch::DynSender<'static, PowerRelay>;
+pub type PowerRelayStateDynReceiver = watch::DynReceiver<'static, PowerRelay>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerRelayCommand {
@@ -20,10 +20,10 @@ pub enum PowerRelayCommand {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PowerRelayState {
+pub enum PowerRelay {
     Open,
     Closed,
-    ForcedOpenLatched,
+    ForcedOpen,
 }
 
 #[must_use]
@@ -41,27 +41,27 @@ pub async fn power_relay(
     relay_receiver: PowerRelayDynReceiver,
     relay_state_sender: PowerRelayStateDynSender,
 ) {
-    let mut state = PowerRelayState::Open;
+    let mut state = PowerRelay::Open;
     pin_power_display_relay.set_low();
     relay_state_sender.send(state);
 
     loop {
         let command = relay_receiver.receive().await;
 
-        if state != PowerRelayState::ForcedOpenLatched {
+        if state != PowerRelay::ForcedOpen {
             match command {
                 PowerRelayCommand::Close => {
-                    state = PowerRelayState::Closed;
+                    state = PowerRelay::Closed;
                     pin_power_display_relay.set_high();
                 }
 
                 PowerRelayCommand::Open => {
-                    state = PowerRelayState::Open;
+                    state = PowerRelay::Open;
                     pin_power_display_relay.set_low();
                 }
 
                 PowerRelayCommand::ForceOpenLatch => {
-                    state = PowerRelayState::ForcedOpenLatched;
+                    state = PowerRelay::ForcedOpen;
                     pin_power_display_relay.set_low();
                 }
             }

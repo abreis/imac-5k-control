@@ -2,9 +2,7 @@ use super::{
     fan_control::{FanDutyDynReceiver, FanDutyDynSender, FanTachyDynReceiver},
     net_monitor::{NetStatusDynReceiver, NetworkStatus},
     pin_control::{DisplayLedDynReceiver, LedState, PinControlMessage, PinControlPublisher},
-    power_relay::{
-        PowerRelayCommand, PowerRelayDynSender, PowerRelayState, PowerRelayStateDynReceiver,
-    },
+    power_relay::{PowerRelay, PowerRelayCommand, PowerRelayDynSender, PowerRelayStateDynReceiver},
     temp_sensor::{TempSensorDynReceiver, TemperatureReading},
 };
 use crate::memlog::{Record, SharedLogger};
@@ -57,7 +55,7 @@ pub enum Event {
     FanDuty(u8),
     FanTachy(u16),
     Net(NetworkStatus),
-    Relay(PowerRelayState),
+    Relay(PowerRelay),
     Temperature(TemperatureReading),
     LogsSnapshot(Vec<Record>),
     TimedOut,
@@ -340,7 +338,7 @@ mod app {
         fan_input: String,
         fan_input_dirty: bool,
         net_status: Option<NetworkStatus>,
-        relay_state: Option<PowerRelayState>,
+        relay_state: Option<PowerRelay>,
         temperature: Option<TemperatureReading>,
         temp_history: VecDeque<u64>,
         logs: Vec<Record>,
@@ -458,9 +456,9 @@ mod app {
 
         fn toggle_relay(&mut self) {
             let command = match self.relay_state {
-                Some(PowerRelayState::Open) => PowerRelayCommand::Close,
-                Some(PowerRelayState::Closed) => PowerRelayCommand::Open,
-                Some(PowerRelayState::ForcedOpenLatched) => {
+                Some(PowerRelay::Open) => PowerRelayCommand::Close,
+                Some(PowerRelay::Closed) => PowerRelayCommand::Open,
+                Some(PowerRelay::ForcedOpen) => {
                     self.status = String::from("relay latched");
                     return;
                 }
@@ -694,20 +692,20 @@ mod app {
 
         fn relay_text(&self) -> String {
             let state_text = match self.relay_state {
-                Some(PowerRelayState::Open) => "off",
-                Some(PowerRelayState::Closed) => "on",
-                Some(PowerRelayState::ForcedOpenLatched) => "latched",
+                Some(PowerRelay::Open) => "off",
+                Some(PowerRelay::Closed) => "on",
+                Some(PowerRelay::ForcedOpen) => "latched",
                 None => "--",
             };
 
             let button_text = match self.relay_state {
-                Some(PowerRelayState::Open) => {
+                Some(PowerRelay::Open) => {
                     format_focus_button("on", self.focus == Focus::RelayToggle)
                 }
-                Some(PowerRelayState::Closed) => {
+                Some(PowerRelay::Closed) => {
                     format_focus_button("off", self.focus == Focus::RelayToggle)
                 }
-                Some(PowerRelayState::ForcedOpenLatched) => String::from("[locked]"),
+                Some(PowerRelay::ForcedOpen) => String::from("[locked]"),
                 None => String::from("[wait]"),
             };
 

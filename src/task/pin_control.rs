@@ -105,10 +105,7 @@ pub async fn pin_control(
     buzzer_channel: BuzzerChannel,
     memlog: SharedLogger,
 ) {
-    let mut led_state = LedState {
-        green: false,
-        red: false,
-    };
+    let mut led_state: Option<LedState> = None;
     let mut fault_active = false;
     let mut led_poll_ticker = Ticker::every(LED_POLL_INTERVAL);
 
@@ -121,9 +118,9 @@ pub async fn pin_control(
                 // LED poller ticked, read LED pins and update.
                 Either::First(_tick) => {
                     let new_led_state = ioexpander.read_leds()?;
-                    if led_state != new_led_state {
+                    if Some(new_led_state) != led_state {
                         display_led_sender.send(new_led_state);
-                        led_state = new_led_state;
+                        led_state = Some(new_led_state);
                     }
                 }
 

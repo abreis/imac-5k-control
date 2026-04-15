@@ -150,6 +150,9 @@ async fn main(spawner: Spawner) {
     // Get a command channel and state watcher for the display-controller power relay.
     let (powerrelay_channel, powerrelay_watch) = task::power_relay::init::<4, 3>();
 
+    // Get a watcher for the consolidated display-board state.
+    let displayboard_watch = task::display_board::init::<2>();
+
     // WRITEME
     let (control_signal, event_channel) = task::serial_tui::init();
 
@@ -191,6 +194,17 @@ async fn main(spawner: Spawner) {
             pin_power_display_relay,
             powerrelay_channel.dyn_receiver(),
             powerrelay_watch.dyn_sender(),
+        ))?;
+
+        // Consolidate display-board state and handle case-button events.
+        spawner.spawn(task::display_board(
+            casebutton_watch.dyn_receiver().unwrap(),
+            displayled_watch.dyn_receiver().unwrap(),
+            pincontrol_pubsub.dyn_publisher().unwrap(),
+            powerrelay_channel.dyn_sender(),
+            powerrelay_watch.dyn_receiver().unwrap(),
+            displayboard_watch.dyn_sender(),
+            memlog,
         ))?;
 
         // Watch the case button for presses.
