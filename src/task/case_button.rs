@@ -1,28 +1,35 @@
-use super::pin_control::PinControlMessage;
 use crate::{
     memlog::SharedLogger,
-    task::{
-        buzzer::{BuzzerAction, BuzzerChannel, BuzzerPattern},
-        pin_control::PinControlPublisher,
-    },
+    task::buzzer::{BuzzerAction, BuzzerChannel, BuzzerPattern},
 };
 use alloc::boxed::Box;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 use embassy_time::Duration;
-use esp_hal::{gpio, time::Instant};
+use esp_hal::gpio;
 
-const BUTTON_HELD_DURATION_MIN: Duration = Duration::from_millis(500);
-const BUTTON_HELD_DURATION_MAX: Duration = Duration::from_millis(1500);
+const SHORT_PRESS_MIN_DURATION: Duration = Duration::from_millis(1000);
+const LONG_PRESS_MIN_DURATION: Duration = Duration::from_millis(4000);
 
-const CASE_BUTTON_TONE: BuzzerPattern = &[
+// TODO: move this to our state machine task
+const CASE_BUTTON_SHORT_PRESS_PATTERN: BuzzerPattern = &[
     BuzzerAction::Beep { ms: 100 },
     BuzzerAction::Pause { ms: 50 },
     BuzzerAction::Beep { ms: 100 },
 ];
+const CASE_BUTTON_LONG_PRESS_PATTERN: BuzzerPattern = &[
+    BuzzerAction::Beep { ms: 320 },
+    BuzzerAction::Pause { ms: 100 },
+];
 
-pub type CaseButtonWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, Instant, W>;
-pub type CaseButtonDynSender = watch::DynSender<'static, Instant>;
-pub type CaseButtonDynReceiver = watch::DynReceiver<'static, Instant>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaseButton {
+    ShortPress,
+    LongPress,
+}
+
+pub type CaseButtonWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, CaseButton, W>;
+pub type CaseButtonDynSender = watch::DynSender<'static, CaseButton>;
+pub type CaseButtonDynReceiver = watch::DynReceiver<'static, CaseButton>;
 
 pub fn init<const WATCHERS: usize>() -> CaseButtonWatch<WATCHERS> {
     Box::leak(Box::new(watch::Watch::new()))
@@ -31,7 +38,7 @@ pub fn init<const WATCHERS: usize>() -> CaseButtonWatch<WATCHERS> {
 #[embassy_executor::task]
 pub async fn case_button(
     pin: gpio::AnyPin<'static>,
-    pincontrol_publisher: PinControlPublisher,
+    casebutton_sender: CaseButtonDynSender,
     buzzer_channel: BuzzerChannel,
     memlog: SharedLogger,
 ) {
@@ -39,27 +46,36 @@ pub async fn case_button(
     let mut case_pin =
         gpio::Input::new(pin, gpio::InputConfig::default().with_pull(gpio::Pull::Up));
 
-    // Wait for the pin to go low for a given amount of time.
-    // Ignore the click if its duration is too short. Shortcircuit if the button
-    // is held for a long time. The idea here is that the user can hold the
-    // button 'until something happens', not knowing how long that takes.
     loop {
         case_pin.wait_for_falling_edge().await;
-        let fall_time = embassy_time::Instant::now();
 
-        let wait_for_high = case_pin.wait_for_high();
-        let _ = embassy_time::with_timeout(BUTTON_HELD_DURATION_MAX, wait_for_high).await;
+        // Button was pressed.
 
-        let held_duration = fall_time.elapsed();
-        if held_duration > BUTTON_HELD_DURATION_MIN {
-            memlog.info("case: button triggered");
-
-            casebutton_sender.send(Instant::now());
-
-            buzzer_channel.send(CASE_BUTTON_TONE).await;
-            pincontrol_publisher
-                .publish(PinControlMessage::ButtonPower)
-                .await;
+        if embassy_time::with_timeout(SHORT_PRESS_MIN_DURATION, case_pin.wait_for_high())
+            .await
+            .is_ok()
+        {
+            // Button was released before a short press.
+            continue;
         }
+
+        // Button is held for a short press.
+        buzzer_channel.send(CASE_BUTTON_SHORT_PRESS_PATTERN).await;
+
+        let long_press_remaining = LONG_PRESS_MIN_DURATION - SHORT_PRESS_MIN_DURATION;
+        if embassy_time::with_timeout(long_press_remaining, case_pin.wait_for_high())
+            .await
+            .is_ok()
+        {
+            // Button is released in time for a short press.
+            casebutton_sender.send(CaseButton::ShortPress);
+            memlog.info("case: short button press");
+            continue;
+        }
+
+        // Button was held for a long press.
+        buzzer_channel.send(CASE_BUTTON_LONG_PRESS_PATTERN).await;
+        casebutton_sender.send(CaseButton::LongPress);
+        memlog.info("case: long button press");
     }
 }

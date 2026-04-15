@@ -37,7 +37,7 @@ async fn main(spawner: Spawner) {
     // - 64 KiB reclaimed + 160 KiB regular: probably still fine, but we would measure first
     // To measure, print `esp_alloc::HEAP.stats()` after boot and again after Wi‑Fi + MQTT are connected.
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
-    esp_alloc::heap_allocator!(size: 128 * 1024);
+    esp_alloc::heap_allocator!(size: 160 * 1024);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_interrupt =
@@ -197,7 +197,6 @@ async fn main(spawner: Spawner) {
         spawner.spawn(task::case_button(
             pin_button_case.into(),
             casebutton_watch.dyn_sender(),
-            pincontrol_pubsub.dyn_publisher().unwrap(),
             buzzer_channel,
             memlog,
         ))?;

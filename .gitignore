@@ -8,6 +8,7 @@ Cargo.lock
 # Every directory except whitelist.
 /*/
 !/src/
+!/docs/
 !/.cargo/
 
 # Every markdown except whitelist.
