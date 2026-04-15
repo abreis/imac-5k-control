@@ -1,4 +1,5 @@
 use super::{
+    display_board::{DisplayBoardDynReceiver, DisplayBoardState},
     fan_control::{FanDutyDynReceiver, FanDutyDynSender, FanTachyDynReceiver},
     net_monitor::{NetStatusDynReceiver, NetworkStatus},
     pin_control::{DisplayLedDynReceiver, LedState, PinControlMessage, PinControlPublisher},
@@ -57,6 +58,7 @@ pub enum Event {
     Net(NetworkStatus),
     Relay(PowerRelay),
     Temperature(TemperatureReading),
+    DisplayBoard(DisplayBoardState),
     LogsSnapshot(Vec<Record>),
     TimedOut,
 }
@@ -88,6 +90,7 @@ pub async fn tui_event_stream(
     mut netstatus_receiver: NetStatusDynReceiver,
     mut powerrelay_receiver: PowerRelayStateDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
+    mut displayboard_receiver: DisplayBoardDynReceiver,
     memlog: SharedLogger,
     control_signal: &'static SessionControlSignal,
     event_channel: &'static EventChannel,
@@ -123,6 +126,9 @@ pub async fn tui_event_stream(
         }
         if let Some(value) = tempsensor_receiver.try_get() {
             event_channel.send(Event::Temperature(value)).await;
+        }
+        if let Some(value) = displayboard_receiver.try_get() {
+            event_channel.send(Event::DisplayBoard(value)).await;
         }
         let value = collect_logs(memlog, LOG_LINE_COUNT);
         event_channel.send(Event::LogsSnapshot(value)).await;
@@ -488,6 +494,7 @@ mod app {
                 Event::Net(net_status) => self.net_status = Some(net_status),
                 Event::Relay(relay_state) => self.relay_state = Some(relay_state),
                 Event::Temperature(temperature) => self.push_temperature_sample(temperature),
+                Event::DisplayBoard(board_state) => (), // TODO
                 Event::LogsSnapshot(logs) => self.logs = logs,
                 Event::TimedOut => return Action::Exit,
             }

@@ -151,7 +151,7 @@ async fn main(spawner: Spawner) {
     let (powerrelay_channel, powerrelay_watch) = task::power_relay::init::<4, 3>();
 
     // Get a watcher for the consolidated display-board state.
-    let displayboard_watch = task::display_board::init::<2>();
+    let displayboard_watch = task::display_board::init::<3>();
 
     // WRITEME
     let (control_signal, event_channel) = task::serial_tui::init();
@@ -245,6 +245,7 @@ async fn main(spawner: Spawner) {
             pincontrol_pubsub.dyn_subscriber().unwrap(),
             netstatus_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
+            displayboard_watch.dyn_receiver().unwrap(),
             memlog,
         ))?;
 
@@ -256,6 +257,7 @@ async fn main(spawner: Spawner) {
             netstatus_watch.dyn_receiver().unwrap(),
             powerrelay_watch.dyn_receiver().unwrap(),
             tempsensor_watch.dyn_receiver().unwrap(),
+            displayboard_watch.dyn_receiver().unwrap(),
             memlog,
             control_signal,
             event_channel,

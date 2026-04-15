@@ -1,6 +1,7 @@
 use crate::{
     memlog::SharedLogger,
     task::{
+        display_board::DisplayBoardDynReceiver,
         fan_control::{FanDutyDynReceiver, FanTachyDynReceiver},
         net_monitor::NetStatusDynReceiver,
         pin_control::{PinControlMessage, PinControlPublisher, PinControlSubscriber},
@@ -118,6 +119,7 @@ pub async fn run(
     mut pincontrol_subscriber: PinControlSubscriber,
     mut netstatus_receiver: NetStatusDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
+    mut displayboard_receiver: DisplayBoardDynReceiver,
     memlog: SharedLogger,
 ) {
     let broker_addr = 'dns: loop {
@@ -225,22 +227,24 @@ pub async fn run(
                     let pincontrol_fut = pincontrol_subscriber.next_message();
                     let net_fut = netstatus_receiver.changed();
                     let log_fut = logwatch_receiver.changed();
+                    let dspl_fut = displayboard_receiver.changed();
 
-                    embassy_infinite_futures::generate_select!(8);
-                    match select8(
+                    embassy_infinite_futures::generate_select!(9);
+                    match select9(
                         temp_fut,
                         fanduty_fut,
                         fantachy_fut,
                         pincontrol_fut,
                         net_fut,
                         log_fut,
+                        dspl_fut,
                         &mut ping_fut,
                         &mut poll_fut,
                     )
                     .await
                     {
                         // Publish temperature sensor readings.
-                        Either8::Future1(sensor_data) => {
+                        Either9::Future1(sensor_data) => {
                             if let Ok(temp) = sensor_data.temperature {
                                 mqtt_client
                                     .publish(
@@ -254,7 +258,7 @@ pub async fn run(
                         }
 
                         // Publish fan duty values.
-                        Either8::Future2(duty) => {
+                        Either9::Future2(duty) => {
                             mqtt_client
                                 .publish(
                                     mqtt_topic!("fan/duty"),
@@ -266,7 +270,7 @@ pub async fn run(
                         }
 
                         // Publish fan tachy readings.
-                        Either8::Future3(rpms) => {
+                        Either9::Future3(rpms) => {
                             mqtt_client
                                 .publish(
                                     mqtt_topic!("fan/tachy"),
@@ -278,7 +282,7 @@ pub async fn run(
                         }
 
                         // Publish pincontrol commands.
-                        Either8::Future4(pincontrol) => {
+                        Either9::Future4(pincontrol) => {
                             if let WaitResult::Message(command) = pincontrol {
                                 let command =
                                     serde_json_core::to_string::<_, 128>(&command).unwrap();
@@ -294,7 +298,7 @@ pub async fn run(
                         }
 
                         // Publish network status updates.
-                        Either8::Future5(net) => {
+                        Either9::Future5(net) => {
                             mqtt_client
                                 .publish(
                                     mqtt_topic!("net"),
@@ -306,7 +310,7 @@ pub async fn run(
                         }
 
                         // Publish logs.
-                        Either8::Future6(log) => {
+                        Either9::Future6(log) => {
                             mqtt_client
                                 .publish(
                                     mqtt_topic!("log"),
@@ -317,14 +321,26 @@ pub async fn run(
                                 .await?;
                         }
 
+                        // Publish changes to the display board state.
+                        Either9::Future7(state) => {
+                            mqtt_client
+                                .publish(
+                                    mqtt_topic!("state"),
+                                    format!("{state:?}").as_bytes(),
+                                    QualityOfService::Qos0,
+                                    false,
+                                )
+                                .await?;
+                        }
+
                         // Periodically send a ping to the server.
-                        Either8::Future7(_ping) => {
+                        Either9::Future8(_ping) => {
                             mqtt_client.send_ping().await?;
                             ping_fut = Timer::after(MQTT_PING_INTERVAL);
                         }
 
                         // Periodic poll for MQTT messages.
-                        Either8::Future8(_trigger) => {
+                        Either9::Future9(_trigger) => {
                             mqtt_client.poll(false).await?;
                             poll_fut = Timer::after_secs(1);
                         }
