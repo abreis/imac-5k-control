@@ -1,5 +1,5 @@
 use super::{
-    display_board::{DisplayBoardDynReceiver, DisplayBoard},
+    display_state::{DisplayState, DisplayStateDynReceiver},
     fan_control::{FanDutyDynReceiver, FanDutyDynSender, FanTachyDynReceiver},
     net_monitor::{NetStatusDynReceiver, NetworkStatus},
     pin_control::{DisplayLedDynReceiver, LedState, PinControlMessage, PinControlPublisher},
@@ -58,7 +58,7 @@ pub enum Event {
     Net(NetworkStatus),
     Relay(PowerRelay),
     Temperature(TemperatureReading),
-    DisplayBoard(DisplayBoard),
+    DisplayBoard(DisplayState),
     LogsSnapshot(Vec<Record>),
     TimedOut,
 }
@@ -90,7 +90,7 @@ pub async fn tui_event_stream(
     mut netstatus_receiver: NetStatusDynReceiver,
     mut powerrelay_receiver: PowerRelayStateDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
-    mut displayboard_receiver: DisplayBoardDynReceiver,
+    mut displayboard_receiver: DisplayStateDynReceiver,
     memlog: SharedLogger,
     control_signal: &'static SessionControlSignal,
     event_channel: &'static EventChannel,

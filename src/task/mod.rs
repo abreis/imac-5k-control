@@ -1,6 +1,7 @@
 pub mod buzzer;
 pub mod case_button;
-pub mod display_board;
+pub mod display_control;
+pub mod display_state;
 pub mod fan_control;
 pub mod mqtt;
 pub mod net;
@@ -13,7 +14,8 @@ pub mod wifi;
 
 pub use buzzer::buzzer_control;
 pub use case_button::case_button;
-pub use display_board::display_board;
+pub use display_control::display_control;
+pub use display_state::display_board;
 pub use fan_control::fan_duty;
 pub use fan_control::fan_tachy;
 pub use fan_control::fan_temp_control;

@@ -1,7 +1,7 @@
 use crate::{
     memlog::SharedLogger,
     task::{
-        display_board::DisplayBoardDynReceiver,
+        display_state::DisplayStateDynReceiver,
         fan_control::{FanDutyDynReceiver, FanTachyDynReceiver},
         net_monitor::NetStatusDynReceiver,
         pin_control::{PinControlMessage, PinControlPublisher, PinControlSubscriber},
@@ -119,7 +119,7 @@ pub async fn run(
     mut pincontrol_subscriber: PinControlSubscriber,
     mut netstatus_receiver: NetStatusDynReceiver,
     mut tempsensor_receiver: TempSensorDynReceiver,
-    mut displayboard_receiver: DisplayBoardDynReceiver,
+    mut displayboard_receiver: DisplayStateDynReceiver,
     memlog: SharedLogger,
 ) {
     let broker_addr = 'dns: loop {

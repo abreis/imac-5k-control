@@ -1,17 +1,16 @@
 use crate::{
     memlog::SharedLogger,
     task::{
-        case_button::{CaseButton, CaseButtonDynReceiver},
-        pin_control::{DisplayLedDynReceiver, LedState, PinControlPublisher},
-        power_relay::{PowerRelay, PowerRelayDynSender, PowerRelayStateDynReceiver},
+        pin_control::{DisplayLedDynReceiver, LedState},
+        power_relay::{PowerRelay, PowerRelayStateDynReceiver},
     },
 };
 use alloc::{boxed::Box, format};
-use embassy_futures::select::{Either3, select3};
+use embassy_futures::select::{Either, select};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, watch};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DisplayBoard {
+pub enum DisplayState {
     Unknown,
     DcPowerOff,
     BoardOff,
@@ -20,57 +19,51 @@ pub enum DisplayBoard {
     RelayLatchedFault,
 }
 
-pub type DisplayBoardWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, DisplayBoard, W>;
-pub type DisplayBoardDynSender = watch::DynSender<'static, DisplayBoard>;
-pub type DisplayBoardDynReceiver = watch::DynReceiver<'static, DisplayBoard>;
+pub type DisplayStateWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, DisplayState, W>;
+pub type DisplayStateDynSender = watch::DynSender<'static, DisplayState>;
+pub type DisplayStateDynReceiver = watch::DynReceiver<'static, DisplayState>;
 
-pub fn init<const WATCHERS: usize>() -> DisplayBoardWatch<WATCHERS> {
+pub fn init<const WATCHERS: usize>() -> DisplayStateWatch<WATCHERS> {
     Box::leak(Box::new(watch::Watch::new()))
 }
 
-fn derive_state(relay_state: PowerRelay, led_state: LedState) -> DisplayBoard {
+fn derive_state(relay_state: PowerRelay, led_state: LedState) -> DisplayState {
     match relay_state {
-        PowerRelay::ForcedOpen => DisplayBoard::RelayLatchedFault,
+        PowerRelay::ForcedOpen => DisplayState::RelayLatchedFault,
 
-        PowerRelay::Open => DisplayBoard::DcPowerOff,
+        PowerRelay::Open => DisplayState::DcPowerOff,
 
         PowerRelay::Closed => match led_state {
             LedState {
                 red: false,
                 green: false,
-            } => DisplayBoard::BoardOff,
+            } => DisplayState::BoardOff,
 
             LedState {
                 red: true,
                 green: false,
-            } => DisplayBoard::Standby,
+            } => DisplayState::Standby,
 
             LedState {
                 red: false,
                 green: true,
-            } => DisplayBoard::Active,
+            } => DisplayState::Active,
 
             LedState {
                 red: true,
                 green: true,
-            } => DisplayBoard::Unknown,
+            } => DisplayState::Unknown,
         },
     }
 }
 
 #[embassy_executor::task]
 pub async fn display_board(
-    mut casebutton_receiver: CaseButtonDynReceiver,
     mut displayled_receiver: DisplayLedDynReceiver,
-    pincontrol_publisher: PinControlPublisher,
-    powerrelay_sender: PowerRelayDynSender,
     mut powerrelay_receiver: PowerRelayStateDynReceiver,
-    displayboard_sender: DisplayBoardDynSender,
+    displayboard_sender: DisplayStateDynSender,
     memlog: SharedLogger,
 ) {
-    let _ = &pincontrol_publisher; // TODO
-    let _ = &powerrelay_sender; // TODO
-
     // Wait for initial values of the relay and the board LEDs to arrive.
     let mut relay_state = powerrelay_receiver.get().await;
     let mut led_state = displayled_receiver.get().await;
@@ -81,20 +74,11 @@ pub async fn display_board(
     memlog.info(format!("display: state -> {display_state:?}"));
 
     loop {
-        match select3(
-            casebutton_receiver.changed(),
-            displayled_receiver.changed(),
-            powerrelay_receiver.changed(),
-        )
-        .await
-        {
-            Either3::First(case_button) => {
-                // TODO match (case_button, display_state)
-            }
+        let dspl_fut = displayled_receiver.changed();
+        let relay_fut = powerrelay_receiver.changed();
 
-            //
-            // Update state based on board LEDs.
-            Either3::Second(new_led_state) => {
+        match select(dspl_fut, relay_fut).await {
+            Either::First(new_led_state) => {
                 led_state = new_led_state;
                 let new_display_state = derive_state(relay_state, led_state);
 
@@ -105,9 +89,7 @@ pub async fn display_board(
                 }
             }
 
-            //
-            // Update state based on our power relay.
-            Either3::Third(new_relay_state) => {
+            Either::Second(new_relay_state) => {
                 relay_state = new_relay_state;
                 let new_display_state = derive_state(relay_state, led_state);
 
