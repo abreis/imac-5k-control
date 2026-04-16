@@ -22,7 +22,7 @@ const BUTTON_PANEL_WIDTH: u16 = 24;
 const MAX_FAN_INPUT_LEN: usize = 3;
 const TEMP_HISTORY_LEN: usize = 24;
 const LOG_LINE_COUNT: usize = 11;
-const EVENT_CHANNEL_CAPACITY: usize = 16;
+const EVENT_CHANNEL_CAPACITY: usize = 8;
 
 struct ButtonSpec {
     label: &'static str,
@@ -227,7 +227,7 @@ pub async fn run(
 
     let tui_config = ratatui_serial::Config {
         terminal_size: (80, 24).into(),
-        rx_buffer_len: 64,
+        rx_buffer_len: 32,
         eof_behavior: ratatui_serial::EofBehavior::Retry,
     };
 
@@ -307,7 +307,11 @@ mod app {
         text::Line,
     };
     use ratatui_serial::{Action, InputEvent, TerminalApp};
-    use ratatui_widgets::{block::Block, list::List, paragraph::Paragraph, sparkline::Sparkline};
+    use ratatui_widgets::{
+        block::Block,
+        paragraph::{Paragraph, Wrap},
+        sparkline::Sparkline,
+    };
 
     //
     // Launch screen application.
@@ -665,15 +669,19 @@ mod app {
 
         fn render_logs(&self, frame: &mut Frame<'_>, area: Rect) {
             let block = Block::bordered();
-            let inner = block.inner(area);
-            let max_width = inner.width as usize;
-            let lines = self
-                .logs
-                .iter()
-                .map(|record| truncate(&format!("{record}"), max_width))
-                .collect::<Vec<_>>();
+            let mut text = String::new();
 
-            frame.render_widget(List::new(lines).block(block), area);
+            for (index, record) in self.logs.iter().enumerate() {
+                if index > 0 {
+                    text.push('\n');
+                }
+                text.push_str(&format!("{record}"));
+            }
+
+            frame.render_widget(
+                Paragraph::new(text).wrap(Wrap { trim: true }).block(block),
+                area,
+            );
         }
 
         fn led_text(&self) -> String {
@@ -828,9 +836,5 @@ mod app {
         } else {
             format!("[{label}]")
         }
-    }
-
-    fn truncate(text: &str, max_width: usize) -> String {
-        text.chars().take(max_width).collect()
     }
 }
