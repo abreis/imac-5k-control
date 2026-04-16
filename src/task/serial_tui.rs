@@ -17,11 +17,11 @@ const UART_BAUD_RATE: u32 = 921_600;
 
 const SESSION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-const PANEL_HEIGHT: u16 = 10;
+const PANEL_HEIGHT: u16 = 11;
 const BUTTON_PANEL_WIDTH: u16 = 24;
 const MAX_FAN_INPUT_LEN: usize = 3;
 const TEMP_HISTORY_LEN: usize = 24;
-const LOG_LINE_COUNT: usize = 12;
+const LOG_LINE_COUNT: usize = 11;
 const EVENT_CHANNEL_CAPACITY: usize = 16;
 
 struct ButtonSpec {
@@ -143,41 +143,44 @@ pub async fn tui_event_stream(
             let net_fut = netstatus_receiver.changed();
             let relay_fut = powerrelay_receiver.changed();
             let temp_fut = tempsensor_receiver.changed();
+            let dspl_fut = displayboard_receiver.changed();
             let log_fut = logwatch_receiver.changed();
             let control_fut = control_signal.wait();
 
-            embassy_infinite_futures::generate_select!(9);
-            let event = match select9(
+            embassy_infinite_futures::generate_select!(10);
+            let event = match select10(
                 led_fut,
                 duty_fut,
                 tachy_fut,
                 net_fut,
                 relay_fut,
                 temp_fut,
+                dspl_fut,
                 log_fut,
                 &mut timeout_fut,
                 control_fut,
             )
             .await
             {
-                Either9::Future1(led_state) => Event::Led(led_state),
-                Either9::Future2(fan_duty) => Event::FanDuty(fan_duty),
-                Either9::Future3(fan_tachy) => Event::FanTachy(fan_tachy),
-                Either9::Future4(net_status) => Event::Net(net_status),
-                Either9::Future5(relay_state) => Event::Relay(relay_state),
-                Either9::Future6(temperature) => Event::Temperature(temperature),
-                Either9::Future7(_record) => {
+                Either10::Future1(led_state) => Event::Led(led_state),
+                Either10::Future2(fan_duty) => Event::FanDuty(fan_duty),
+                Either10::Future3(fan_tachy) => Event::FanTachy(fan_tachy),
+                Either10::Future4(net_status) => Event::Net(net_status),
+                Either10::Future5(relay_state) => Event::Relay(relay_state),
+                Either10::Future6(temperature) => Event::Temperature(temperature),
+                Either10::Future7(display_state) => Event::DisplayBoard(display_state),
+                Either10::Future8(_record) => {
                     let logs = collect_logs(memlog, LOG_LINE_COUNT);
                     Event::LogsSnapshot(logs)
                 }
 
-                Either9::Future8(_timeout) => {
+                Either10::Future9(_timeout) => {
                     // This event must arrive.
                     event_channel.send(Event::TimedOut).await;
                     break 'session;
                 }
 
-                Either9::Future9(command) => match command {
+                Either10::Future10(command) => match command {
                     SessionCommand::Stop => break 'session,
                     SessionCommand::Start => unreachable!(),
                 },
@@ -346,6 +349,7 @@ mod app {
         net_status: Option<NetworkStatus>,
         relay_state: Option<RelayStatus>,
         temperature: Option<TemperatureReading>,
+        display_state: Option<DisplayState>,
         temp_history: VecDeque<u64>,
         logs: Vec<Record>,
         status: String,
@@ -390,6 +394,7 @@ mod app {
                 net_status: None,
                 relay_state: None,
                 temperature: None,
+                display_state: None,
                 temp_history: VecDeque::with_capacity(TEMP_HISTORY_LEN),
                 logs: Vec::new(),
                 status: String::new(),
@@ -494,7 +499,7 @@ mod app {
                 Event::Net(net_status) => self.net_status = Some(net_status),
                 Event::Relay(relay_state) => self.relay_state = Some(relay_state),
                 Event::Temperature(temperature) => self.push_temperature_sample(temperature),
-                Event::DisplayBoard(board_state) => (), // TODO
+                Event::DisplayBoard(display_state) => self.display_state = Some(display_state),
                 Event::LogsSnapshot(logs) => self.logs = logs,
                 Event::TimedOut => return Action::Exit,
             }
@@ -635,6 +640,7 @@ mod app {
                     Constraint::Length(1),
                     Constraint::Length(1),
                     Constraint::Length(1),
+                    Constraint::Length(1),
                     Constraint::Min(0),
                 ])
                 .split(inner);
@@ -653,7 +659,8 @@ mod app {
 
             frame.render_widget(Paragraph::new(self.fan_live_text()), rows[5]);
             frame.render_widget(Paragraph::new(self.fan_editor_text()), rows[6]);
-            frame.render_widget(Paragraph::new(self.status.as_str()), rows[7]);
+            frame.render_widget(Paragraph::new(self.display_state_text()), rows[7]);
+            frame.render_widget(Paragraph::new(self.status.as_str()), rows[8]);
         }
 
         fn render_logs(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -764,6 +771,13 @@ mod app {
             };
 
             format!("set {input} {send}")
+        }
+
+        fn display_state_text(&self) -> String {
+            match self.display_state {
+                Some(display_state) => format!("disp {display_state:?}"),
+                None => String::from("disp --"),
+            }
         }
     }
 
