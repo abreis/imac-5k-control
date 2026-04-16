@@ -4,7 +4,10 @@ use esp_hal::rng::Rng;
 use esp_radio::wifi;
 
 /// Maximum number of sockets to allocate memory for.
-const NET_SOCKETS: usize = 3;
+/// - dhcp: 1 socke
+/// - dns:  1 socket
+/// - mqtt: 1 socket
+const NET_SOCKETS: usize = 3 + 1;
 use crate::config::NET_CONFIG;
 
 pub async fn init(

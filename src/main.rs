@@ -135,23 +135,23 @@ async fn main(spawner: Spawner) {
     let casebutton_watch = task::case_button::init::<2>();
 
     // Get a shareable channel to send messages to the pincontrol task.
-    let (pincontrol_pubsub, displayled_watch) = task::pin_control::init::<3, 2, 3>();
+    let (pincontrol_pubsub, displayled_watch) = task::pin_control::init::<4, 3, 3>();
 
     // Init the fan duty PWM controller.
     let (pwm_channel, fanduty_watch, fantachy_watch) =
-        task::fan_control::init::<3>(peripherals.LEDC, pin_fan_pwm);
+        task::fan_control::init::<4>(peripherals.LEDC, pin_fan_pwm);
 
     // Get a watcher to await changes in temperature sensor readings.
-    let tempsensor_watch = task::temp_sensor::init::<3>();
+    let tempsensor_watch = task::temp_sensor::init::<5>();
 
     // Get a watcher to monitor the network interface.
-    let netstatus_watch = task::net_monitor::init::<2>();
+    let netstatus_watch = task::net_monitor::init::<3>();
 
     // Get a command channel and state watcher for the display-controller power relay.
     let (powerrelay_channel, powerrelay_watch) = task::power_relay::init::<4, 3>();
 
     // Get a watcher for the consolidated display-board state.
-    let displayboard_watch = task::display_state::init::<3>();
+    let displayboard_watch = task::display_state::init::<4>();
 
     // WRITEME
     let (control_signal, event_channel) = task::serial_tui::init();
@@ -241,6 +241,16 @@ async fn main(spawner: Spawner) {
         spawner.spawn(task::fan_temp_control(
             fanduty_watch.dyn_sender(),
             tempsensor_watch.dyn_receiver().unwrap(),
+        ))?;
+
+        // Hardware safety watchdog.
+        spawner.spawn(task::watchdog(
+            tempsensor_watch.dyn_receiver().unwrap(),
+            fantachy_watch.dyn_receiver().unwrap(),
+            fanduty_watch.dyn_sender(),
+            powerrelay_channel.dyn_sender(),
+            buzzer_channel,
+            memlog,
         ))?;
 
         // Spawn the MQTT control task.

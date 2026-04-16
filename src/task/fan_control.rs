@@ -16,7 +16,7 @@ pub type FanDutyDynSender = watch::DynSender<'static, u8>;
 pub type FanDutyDynReceiver = watch::DynReceiver<'static, u8>;
 
 /// How often to measure the fan's tachometer.
-const FAN_TACHY_MEASURE_INTERVAL: Duration = Duration::from_secs(10);
+pub(crate) const FAN_TACHY_MEASURE_INTERVAL: Duration = Duration::from_secs(10);
 
 pub type FanTachyWatch<const W: usize> = &'static watch::Watch<NoopRawMutex, u16, W>;
 pub type FanTachyDynSender = watch::DynSender<'static, u16>;

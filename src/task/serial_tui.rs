@@ -3,7 +3,7 @@ use super::{
     fan_control::{FanDutyDynReceiver, FanDutyDynSender, FanTachyDynReceiver},
     net_monitor::{NetStatusDynReceiver, NetworkStatus},
     pin_control::{DisplayLedDynReceiver, LedState, PinControlMessage, PinControlPublisher},
-    power_relay::{PowerRelay, PowerRelayCommand, PowerRelayDynSender, PowerRelayStateDynReceiver},
+    power_relay::{PowerRelayDynSender, PowerRelayStateDynReceiver, RelayCommand, RelayStatus},
     temp_sensor::{TempSensorDynReceiver, TemperatureReading},
 };
 use crate::memlog::{Record, SharedLogger};
@@ -56,7 +56,7 @@ pub enum Event {
     FanDuty(u8),
     FanTachy(u16),
     Net(NetworkStatus),
-    Relay(PowerRelay),
+    Relay(RelayStatus),
     Temperature(TemperatureReading),
     DisplayBoard(DisplayState),
     LogsSnapshot(Vec<Record>),
@@ -344,7 +344,7 @@ mod app {
         fan_input: String,
         fan_input_dirty: bool,
         net_status: Option<NetworkStatus>,
-        relay_state: Option<PowerRelay>,
+        relay_state: Option<RelayStatus>,
         temperature: Option<TemperatureReading>,
         temp_history: VecDeque<u64>,
         logs: Vec<Record>,
@@ -462,9 +462,9 @@ mod app {
 
         fn toggle_relay(&mut self) {
             let command = match self.relay_state {
-                Some(PowerRelay::Open) => PowerRelayCommand::Close,
-                Some(PowerRelay::Closed) => PowerRelayCommand::Open,
-                Some(PowerRelay::ForcedOpen) => {
+                Some(RelayStatus::Open) => RelayCommand::Close,
+                Some(RelayStatus::Closed) => RelayCommand::Open,
+                Some(RelayStatus::ForcedOpen) => {
                     self.status = String::from("relay latched");
                     return;
                 }
@@ -477,9 +477,9 @@ mod app {
             match self.powerrelay_sender.try_send(command) {
                 Ok(()) => {
                     self.status = match command {
-                        PowerRelayCommand::Close => String::from("relay on"),
-                        PowerRelayCommand::Open => String::from("relay off"),
-                        PowerRelayCommand::ForceOpenLatch => unreachable!(),
+                        RelayCommand::Close => String::from("relay on"),
+                        RelayCommand::Open => String::from("relay off"),
+                        RelayCommand::ForceOpenLatch => unreachable!(),
                     };
                 }
                 Err(_) => self.status = String::from("relay queue full"),
@@ -699,20 +699,20 @@ mod app {
 
         fn relay_text(&self) -> String {
             let state_text = match self.relay_state {
-                Some(PowerRelay::Open) => "off",
-                Some(PowerRelay::Closed) => "on",
-                Some(PowerRelay::ForcedOpen) => "latched",
+                Some(RelayStatus::Open) => "off",
+                Some(RelayStatus::Closed) => "on",
+                Some(RelayStatus::ForcedOpen) => "latched",
                 None => "--",
             };
 
             let button_text = match self.relay_state {
-                Some(PowerRelay::Open) => {
+                Some(RelayStatus::Open) => {
                     format_focus_button("on", self.focus == Focus::RelayToggle)
                 }
-                Some(PowerRelay::Closed) => {
+                Some(RelayStatus::Closed) => {
                     format_focus_button("off", self.focus == Focus::RelayToggle)
                 }
-                Some(PowerRelay::ForcedOpen) => String::from("[locked]"),
+                Some(RelayStatus::ForcedOpen) => String::from("[locked]"),
                 None => String::from("[wait]"),
             };
 

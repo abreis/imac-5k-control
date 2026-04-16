@@ -25,10 +25,15 @@ pub struct TemperatureReading {
 // const DSPL_TEMP_SENSOR_ADDRESS: u64 = 0xF682AA490B646128;
 const DSPL_TEMP_SENSOR_ADDRESS: u64 = 0x60D7DB490B646128;
 
-// How long to wait between temperature readings.
-const TEMP_MEASUREMENT_INTERVAL: Duration = Duration::from_secs(5);
-// How many attempts to retry reading after a checksum error.
-const CHECKSUM_RETRIES: u8 = 3;
+/// How long to wait between temperature readings.
+pub(crate) const TEMP_READING_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How long a measurement takes (default resolution is 12 bit).
+pub(crate) const SENSOR_MEASUREMENT_TIME: Duration =
+    Duration::from_millis(Resolution::Bits12.measurement_time_ms() as u64);
+
+/// How many attempts to retry reading after a checksum error.
+pub(crate) const CHECKSUM_RETRIES: u8 = 3;
 
 #[embassy_executor::task]
 pub async fn temp_sensor(
@@ -39,7 +44,7 @@ pub async fn temp_sensor(
     let mut sensor = Ds18b20::new(DSPL_TEMP_SENSOR_ADDRESS, onewire_bus).unwrap();
 
     loop {
-        Timer::after(TEMP_MEASUREMENT_INTERVAL).await;
+        Timer::after(TEMP_READING_INTERVAL).await;
 
         let mut retries = 0;
 
@@ -50,9 +55,7 @@ pub async fn temp_sensor(
                 sensor.start_temp_measurement()?;
 
                 // 12bit resolution is the default, expects a 750ms wait time.
-                let wait_time_ms = Resolution::Bits12.measurement_time_ms();
-                let wait_time = Duration::from_millis(wait_time_ms as u64);
-                Timer::after(wait_time).await;
+                Timer::after(SENSOR_MEASUREMENT_TIME).await;
 
                 let data = sensor.read_sensor_data()?;
 

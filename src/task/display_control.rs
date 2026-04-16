@@ -5,7 +5,7 @@ use crate::{
         case_button::{CaseButton, CaseButtonDynReceiver},
         display_state::{DisplayState, DisplayStateDynReceiver},
         pin_control::{PinControlMessage, PinControlPublisher},
-        power_relay::{PowerRelayCommand, PowerRelayDynSender},
+        power_relay::{PowerRelayDynSender, RelayCommand},
     },
 };
 use alloc::{boxed::Box, format};
@@ -50,7 +50,7 @@ pub async fn display_control(
 
         // A long press always forces the relay open.
         if button_press == CaseButton::LongPress {
-            powerrelay_sender.send(PowerRelayCommand::Open).await;
+            powerrelay_sender.send(RelayCommand::Open).await;
         }
 
         // For a short press, find our current state, and dispatch a
@@ -101,7 +101,7 @@ pub async fn display_control(
                 // Long press arrived interrupting a sequence.
                 Either::First(_longpress) => {
                     drop(power_seq_fut); // terminates the sequence (async cancellation)
-                    powerrelay_sender.send(PowerRelayCommand::Open).await;
+                    powerrelay_sender.send(RelayCommand::Open).await;
                     memlog.warn("dspl_ctl: long press during power sequence, forced relay off");
                 }
 
@@ -131,7 +131,7 @@ async fn power_on_from_dc_power_off(
     use DisplayState::*;
 
     // Close the relay, providing DC power.
-    powerrelay_sender.send(PowerRelayCommand::Close).await;
+    powerrelay_sender.send(RelayCommand::Close).await;
 
     // Wait for a move to BoardOff, or Active/Standby.
     // We might be there already, so don't wait on a change.
@@ -206,7 +206,7 @@ async fn power_off_from_operational(
 
     // Pause, then open the relay.
     Timer::after(POWER_OFF_RELAY_CUT_DELAY).await;
-    powerrelay_sender.send(PowerRelayCommand::Open).await;
+    powerrelay_sender.send(RelayCommand::Open).await;
 
     SequenceResult::Finished
 }

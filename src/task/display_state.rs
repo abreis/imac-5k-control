@@ -2,7 +2,7 @@ use crate::{
     memlog::SharedLogger,
     task::{
         pin_control::{DisplayLedDynReceiver, LedState},
-        power_relay::{PowerRelay, PowerRelayStateDynReceiver},
+        power_relay::{PowerRelayStateDynReceiver, RelayStatus},
     },
 };
 use alloc::{boxed::Box, format};
@@ -27,13 +27,13 @@ pub fn init<const WATCHERS: usize>() -> DisplayStateWatch<WATCHERS> {
     Box::leak(Box::new(watch::Watch::new()))
 }
 
-fn derive_state(relay_state: PowerRelay, led_state: LedState) -> DisplayState {
+fn derive_state(relay_state: RelayStatus, led_state: LedState) -> DisplayState {
     match relay_state {
-        PowerRelay::ForcedOpen => DisplayState::RelayLatchedFault,
+        RelayStatus::ForcedOpen => DisplayState::RelayLatchedFault,
 
-        PowerRelay::Open => DisplayState::DcPowerOff,
+        RelayStatus::Open => DisplayState::DcPowerOff,
 
-        PowerRelay::Closed => match led_state {
+        RelayStatus::Closed => match led_state {
             LedState {
                 red: false,
                 green: false,
