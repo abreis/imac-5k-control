@@ -8,15 +8,15 @@ use crate::{
         power_relay::{PowerRelayCommand, PowerRelayDynSender},
     },
 };
-use alloc::format;
-use core::future::pending;
-use embassy_futures::select::{Either3, select3};
-use embassy_time::{Duration, Instant, Timer};
+use alloc::{boxed::Box, format};
+use core::{future::Future, pin::Pin};
+use embassy_futures::select::{Either, select};
+use embassy_time::{Duration, Timer, with_timeout};
 
 const BOARD_OFF_DWELL_BEFORE_POWER_BUTTON: Duration = Duration::from_secs(5);
-const POWER_ON_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
-const POWER_OFF_WAIT_BOARD_OFF_TIMEOUT: Duration = Duration::from_secs(10);
-const POWER_OFF_RELAY_CUT_DELAY: Duration = Duration::from_secs(3);
+const POWER_ON_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+const POWER_OFF_WAIT_BOARD_OFF_TIMEOUT: Duration = Duration::from_secs(2);
+const POWER_OFF_RELAY_CUT_DELAY: Duration = Duration::from_secs(5);
 
 const DISPLAY_POWER_TIMEOUT_PATTERN: BuzzerPattern = &[
     BuzzerAction::Beep { ms: 320 },
@@ -28,315 +28,185 @@ const DISPLAY_POWER_TIMEOUT_PATTERN: BuzzerPattern = &[
     BuzzerAction::Beep { ms: 100 },
 ];
 
-#[derive(Clone, Copy, Debug)]
-enum PendingAction {
-    PowerOnWaitAfterRelayClose {
-        timeout_at: Instant,
-        board_off_since: Option<Instant>,
-    },
-    PowerOnWaitAfterButton {
-        timeout_at: Instant,
-    },
-    PowerOffWaitForBoardOff {
-        timeout_at: Instant,
-    },
-    PowerOffWaitRelayCut {
-        relay_cut_at: Instant,
-    },
-}
-
-impl PendingAction {
-    fn timer_deadline(&self) -> Instant {
-        match self {
-            PendingAction::PowerOnWaitAfterRelayClose {
-                timeout_at,
-                board_off_since: Some(board_off_since),
-            } => {
-                let board_off_dwell_at = *board_off_since + BOARD_OFF_DWELL_BEFORE_POWER_BUTTON;
-                if board_off_dwell_at < *timeout_at {
-                    board_off_dwell_at
-                } else {
-                    *timeout_at
-                }
-            }
-
-            PendingAction::PowerOnWaitAfterRelayClose {
-                timeout_at,
-                board_off_since: None,
-            }
-            | PendingAction::PowerOnWaitAfterButton { timeout_at }
-            | PendingAction::PowerOffWaitForBoardOff { timeout_at } => *timeout_at,
-
-            PendingAction::PowerOffWaitRelayCut { relay_cut_at } => *relay_cut_at,
-        }
-    }
-}
-
-async fn pending_timer(deadline: Option<Instant>) {
-    match deadline {
-        Some(deadline) => Timer::at(deadline).await,
-        None => pending::<()>().await,
-    }
-}
-
-async fn sequence_timed_out(
-    buzzer_channel: BuzzerChannel,
-    memlog: SharedLogger,
-    reason: &'static str,
-) {
-    memlog.warn(format!("displayctl: {reason}"));
-    buzzer_channel.send(DISPLAY_POWER_TIMEOUT_PATTERN).await;
-}
-
-async fn advance_pending_action(
-    pending_action: PendingAction,
-    display_state: DisplayState,
-    pincontrol_publisher: &PinControlPublisher,
-    powerrelay_sender: &PowerRelayDynSender,
-    buzzer_channel: BuzzerChannel,
-    memlog: SharedLogger,
-) -> Option<PendingAction> {
-    let now = Instant::now();
-
-    match pending_action {
-        PendingAction::PowerOnWaitAfterRelayClose {
-            timeout_at,
-            board_off_since,
-        } => {
-            if matches!(display_state, DisplayState::Active | DisplayState::Standby) {
-                memlog.info(format!(
-                    "displayctl: relay restore auto-resumed to {display_state:?}"
-                ));
-                return None;
-            }
-
-            if display_state == DisplayState::BoardOff {
-                let board_off_since = board_off_since.unwrap_or(now);
-                let board_off_dwell_at = board_off_since + BOARD_OFF_DWELL_BEFORE_POWER_BUTTON;
-
-                if now >= board_off_dwell_at {
-                    pincontrol_publisher
-                        .publish(PinControlMessage::ButtonPower)
-                        .await;
-                    memlog.info("displayctl: board off dwell met, pressed display power button");
-
-                    return Some(PendingAction::PowerOnWaitAfterButton {
-                        timeout_at: now + POWER_ON_WAIT_TIMEOUT,
-                    });
-                }
-
-                if now >= timeout_at {
-                    sequence_timed_out(
-                        buzzer_channel,
-                        memlog,
-                        "power-on timed out while waiting for BoardOff dwell",
-                    )
-                    .await;
-                    return None;
-                }
-
-                return Some(PendingAction::PowerOnWaitAfterRelayClose {
-                    timeout_at,
-                    board_off_since: Some(board_off_since),
-                });
-            }
-
-            if now >= timeout_at {
-                sequence_timed_out(
-                    buzzer_channel,
-                    memlog,
-                    "power-on timed out waiting for BoardOff or auto-resume",
-                )
-                .await;
-                None
-            } else {
-                Some(PendingAction::PowerOnWaitAfterRelayClose {
-                    timeout_at,
-                    board_off_since: None,
-                })
-            }
-        }
-
-        PendingAction::PowerOnWaitAfterButton { timeout_at } => {
-            if matches!(display_state, DisplayState::Active | DisplayState::Standby) {
-                memlog.info(format!(
-                    "displayctl: power-on completed to {display_state:?}"
-                ));
-                return None;
-            }
-
-            if now >= timeout_at {
-                sequence_timed_out(
-                    buzzer_channel,
-                    memlog,
-                    "power-on timed out waiting for Active or Standby",
-                )
-                .await;
-                None
-            } else {
-                Some(PendingAction::PowerOnWaitAfterButton { timeout_at })
-            }
-        }
-
-        PendingAction::PowerOffWaitForBoardOff { timeout_at } => {
-            if matches!(
-                display_state,
-                DisplayState::DcPowerOff | DisplayState::RelayLatchedFault
-            ) {
-                memlog.info(format!(
-                    "displayctl: power-off finished early in observed state {display_state:?}"
-                ));
-                return None;
-            }
-
-            if display_state == DisplayState::BoardOff {
-                memlog.info("displayctl: board reached BoardOff, waiting before opening relay");
-                return Some(PendingAction::PowerOffWaitRelayCut {
-                    relay_cut_at: now + POWER_OFF_RELAY_CUT_DELAY,
-                });
-            }
-
-            if now >= timeout_at {
-                sequence_timed_out(
-                    buzzer_channel,
-                    memlog,
-                    "power-off timed out waiting for BoardOff",
-                )
-                .await;
-                None
-            } else {
-                Some(PendingAction::PowerOffWaitForBoardOff { timeout_at })
-            }
-        }
-
-        PendingAction::PowerOffWaitRelayCut { relay_cut_at } => {
-            if matches!(
-                display_state,
-                DisplayState::DcPowerOff | DisplayState::RelayLatchedFault
-            ) {
-                memlog.info(format!(
-                    "displayctl: relay already open in observed state {display_state:?}"
-                ));
-                return None;
-            }
-
-            if now >= relay_cut_at {
-                powerrelay_sender.send(PowerRelayCommand::Open).await;
-                memlog.info("displayctl: opened relay after board shutdown");
-                None
-            } else {
-                Some(PendingAction::PowerOffWaitRelayCut { relay_cut_at })
-            }
-        }
-    }
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum SequenceResult {
+    Finished,
+    TimedOut(&'static str),
+    UnexpectedState(DisplayState),
 }
 
 #[embassy_executor::task]
 pub async fn display_control(
     mut casebutton_receiver: CaseButtonDynReceiver,
     mut displayboard_receiver: DisplayStateDynReceiver,
-    pincontrol_publisher: PinControlPublisher,
-    powerrelay_sender: PowerRelayDynSender,
+    mut pincontrol_publisher: PinControlPublisher,
+    mut powerrelay_sender: PowerRelayDynSender,
     buzzer_channel: BuzzerChannel,
     memlog: SharedLogger,
 ) {
-    let mut display_state = displayboard_receiver.get().await;
-    let mut pending_action: Option<PendingAction> = None;
-
     loop {
-        match select3(
-            casebutton_receiver.changed(),
-            displayboard_receiver.changed(),
-            pending_timer(pending_action.as_ref().map(PendingAction::timer_deadline)),
-        )
-        .await
-        {
-            Either3::First(CaseButton::LongPress) => {
-                if pending_action.take().is_some() {
-                    memlog.info("displayctl: long press interrupted active short-press sequence");
+        // Wait for the case button to be pressed.
+        let button_press = casebutton_receiver.changed().await;
+
+        // A long press always forces the relay open.
+        if button_press == CaseButton::LongPress {
+            powerrelay_sender.send(PowerRelayCommand::Open).await;
+        }
+
+        // For a short press, find our current state, and dispatch a
+        // corresponding power-on or power-off sequence.
+        if button_press == CaseButton::ShortPress {
+            let display_state = displayboard_receiver.get().await;
+
+            use DisplayState::*;
+            let mut power_seq_fut: Pin<Box<dyn Future<Output = SequenceResult>>>;
+            power_seq_fut = match display_state {
+                DcPowerOff => {
+                    let fut = power_on_from_dc_power_off(
+                        &mut displayboard_receiver,
+                        &mut pincontrol_publisher,
+                        &mut powerrelay_sender,
+                    );
+                    Box::pin(fut)
                 }
 
-                powerrelay_sender.send(PowerRelayCommand::Open).await;
-                memlog.info("displayctl: long press -> relay open");
-            }
-
-            Either3::First(CaseButton::ShortPress) => {
-                if pending_action.is_some() {
-                    memlog.info("displayctl: ignoring short press while transition is active");
-                    continue;
+                BoardOff => {
+                    let fut = power_on_from_board_off(
+                        &mut displayboard_receiver,
+                        &mut pincontrol_publisher,
+                    );
+                    Box::pin(fut)
                 }
 
-                match display_state {
-                    DisplayState::DcPowerOff => {
-                        powerrelay_sender.send(PowerRelayCommand::Close).await;
-                        pending_action = Some(PendingAction::PowerOnWaitAfterRelayClose {
-                            timeout_at: Instant::now() + POWER_ON_WAIT_TIMEOUT,
-                            board_off_since: None,
-                        });
-                        memlog.info("displayctl: short press from DcPowerOff -> relay close");
-                    }
-
-                    DisplayState::BoardOff => {
-                        pincontrol_publisher
-                            .publish(PinControlMessage::ButtonPower)
-                            .await;
-                        pending_action = Some(PendingAction::PowerOnWaitAfterButton {
-                            timeout_at: Instant::now() + POWER_ON_WAIT_TIMEOUT,
-                        });
-                        memlog.info("displayctl: short press from BoardOff -> power button");
-                    }
-
-                    DisplayState::Active | DisplayState::Standby => {
-                        pincontrol_publisher
-                            .publish(PinControlMessage::ButtonPower)
-                            .await;
-                        pending_action = Some(PendingAction::PowerOffWaitForBoardOff {
-                            timeout_at: Instant::now() + POWER_OFF_WAIT_BOARD_OFF_TIMEOUT,
-                        });
-                        memlog.info(format!(
-                            "displayctl: short press from {display_state:?} -> power button"
-                        ));
-                    }
-
-                    DisplayState::Unknown => {
-                        memlog.warn("displayctl: ignoring short press in Unknown state");
-                    }
-
-                    DisplayState::RelayLatchedFault => {
-                        memlog.warn("displayctl: ignoring short press while relay is latched open");
-                    }
+                Active | Standby => {
+                    let fut = power_off_from_operational(
+                        &mut displayboard_receiver,
+                        &mut pincontrol_publisher,
+                        &mut powerrelay_sender,
+                    );
+                    Box::pin(fut)
                 }
-            }
 
-            Either3::Second(new_display_state) => {
-                display_state = new_display_state;
+                // Can't transition out of these states.
+                Unknown | RelayLatchedFault => continue,
+            };
 
-                if let Some(action) = pending_action.take() {
-                    pending_action = advance_pending_action(
-                        action,
-                        display_state,
-                        &pincontrol_publisher,
-                        &powerrelay_sender,
-                        buzzer_channel,
-                        memlog,
-                    )
-                    .await;
+            // Now that we have a future that will perform the sequence of
+            // commands, await it while watching for a LongPress. If we get a
+            // long press, the sequence fut is dropped and we open the relay.
+            let long_press_fut =
+                casebutton_receiver.changed_and(|&press| press == CaseButton::LongPress);
+
+            match select(long_press_fut, &mut power_seq_fut).await {
+                // Long press arrived interrupting a sequence.
+                Either::First(_longpress) => {
+                    drop(power_seq_fut); // terminates the sequence (async cancellation)
+                    powerrelay_sender.send(PowerRelayCommand::Open).await;
+                    memlog.warn("dspl_ctl: long press during power sequence, forced relay off");
                 }
-            }
 
-            Either3::Third(()) => {
-                if let Some(action) = pending_action.take() {
-                    pending_action = advance_pending_action(
-                        action,
-                        display_state,
-                        &pincontrol_publisher,
-                        &powerrelay_sender,
-                        buzzer_channel,
-                        memlog,
-                    )
-                    .await;
-                }
+                // Sequence completed.
+                Either::Second(result) => match result {
+                    SequenceResult::Finished => memlog.info("dspl_ctl: power sequence complete"),
+
+                    SequenceResult::TimedOut(reason) => {
+                        buzzer_channel.send(DISPLAY_POWER_TIMEOUT_PATTERN).await;
+                        memlog.warn(format!("dspl_ctl: power sequence timed out: {reason}"));
+                    }
+
+                    SequenceResult::UnexpectedState(state) => {
+                        memlog.warn("dspl_ctl: moved to unexpected state: {state:?}")
+                    }
+                },
             }
         }
     }
+}
+
+async fn power_on_from_dc_power_off(
+    displayboard_receiver: &mut DisplayStateDynReceiver,
+    pincontrol_publisher: &PinControlPublisher,
+    powerrelay_sender: &PowerRelayDynSender,
+) -> SequenceResult {
+    use DisplayState::*;
+
+    // Close the relay, providing DC power.
+    powerrelay_sender.send(PowerRelayCommand::Close).await;
+
+    // Wait for a move to BoardOff, or Active/Standby.
+    // We might be there already, so don't wait on a change.
+    // Note: `get_and()` waits for the predicate to match, and also resolves
+    // immediately if it's already matching.
+    let timeout = POWER_ON_WAIT_TIMEOUT;
+    let boardoff_fut = displayboard_receiver
+        .get_and(|&state| state == BoardOff || state == Active || state == Standby);
+    match with_timeout(timeout, boardoff_fut).await {
+        Err(_timeout) => return SequenceResult::TimedOut("no move from power off"),
+        Ok(Active) | Ok(Standby) => return SequenceResult::Finished,
+        Ok(BoardOff) => (),
+        _ => unreachable!(),
+    }
+
+    // Now give the board time to physically power on.
+    Timer::after(BOARD_OFF_DWELL_BEFORE_POWER_BUTTON).await;
+
+    // At this stage we might be in BoardOff or in Active/Standby.
+    // If the former, press the power button. If the latter, we're done.
+    match displayboard_receiver.get().await {
+        BoardOff => power_on_from_board_off(displayboard_receiver, pincontrol_publisher).await,
+
+        Active | Standby => SequenceResult::Finished,
+
+        unexpected => SequenceResult::UnexpectedState(unexpected),
+    }
+}
+
+async fn power_on_from_board_off(
+    displayboard_receiver: &mut DisplayStateDynReceiver,
+    pincontrol_publisher: &PinControlPublisher,
+) -> SequenceResult {
+    use DisplayState::*;
+
+    // Push the board's power button.
+    pincontrol_publisher
+        .publish(PinControlMessage::ButtonPower)
+        .await;
+
+    // Expect the board to flash either red or green, switching us to an
+    // operational state (Active or Standby).
+    let timeout = POWER_ON_WAIT_TIMEOUT;
+    let operational_fut =
+        displayboard_receiver.get_and(|&state| state == Active || state == Standby);
+
+    if let Err(_timeout) = with_timeout(timeout, operational_fut).await {
+        SequenceResult::TimedOut("no move to operational")
+    } else {
+        SequenceResult::Finished
+    }
+}
+
+async fn power_off_from_operational(
+    displayboard_receiver: &mut DisplayStateDynReceiver,
+    pincontrol_publisher: &PinControlPublisher,
+    powerrelay_sender: &PowerRelayDynSender,
+) -> SequenceResult {
+    use DisplayState::*;
+
+    // Push the board's power button.
+    pincontrol_publisher
+        .publish(PinControlMessage::ButtonPower)
+        .await;
+
+    // Expect the state to transition to BoardOff.
+    let timeout = POWER_OFF_WAIT_BOARD_OFF_TIMEOUT;
+    let boardoff_fut = displayboard_receiver.get_and(|&state| state == BoardOff);
+    if let Err(_timeout) = with_timeout(timeout, boardoff_fut).await {
+        return SequenceResult::TimedOut("no move to board off");
+    }
+
+    // Pause, then open the relay.
+    Timer::after(POWER_OFF_RELAY_CUT_DELAY).await;
+    powerrelay_sender.send(PowerRelayCommand::Open).await;
+
+    SequenceResult::Finished
 }
