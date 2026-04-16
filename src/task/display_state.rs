@@ -71,7 +71,6 @@ pub async fn display_board(
     // Initial display state.
     let mut display_state = derive_state(relay_state, led_state);
     displayboard_sender.send(display_state);
-    memlog.info(format!("display: state -> {display_state:?}"));
 
     loop {
         let dspl_fut = displayled_receiver.changed();
@@ -80,23 +79,23 @@ pub async fn display_board(
         match select(dspl_fut, relay_fut).await {
             Either::First(new_led_state) => {
                 led_state = new_led_state;
-                let new_display_state = derive_state(relay_state, led_state);
+                let new_state = derive_state(relay_state, led_state);
 
-                if display_state != new_display_state {
-                    display_state = new_display_state;
+                if display_state != new_state {
+                    memlog.info(format!("dspl: {display_state:?} -> {new_state:?}"));
+                    display_state = new_state;
                     displayboard_sender.send(display_state);
-                    memlog.info(format!("display: state -> {display_state:?}"));
                 }
             }
 
             Either::Second(new_relay_state) => {
                 relay_state = new_relay_state;
-                let new_display_state = derive_state(relay_state, led_state);
+                let new_state = derive_state(relay_state, led_state);
 
-                if display_state != new_display_state {
-                    display_state = new_display_state;
+                if display_state != new_state {
+                    memlog.info(format!("dspl: {display_state:?} -> {new_state:?}"));
+                    display_state = new_state;
                     displayboard_sender.send(display_state);
-                    memlog.info(format!("display: state -> {display_state:?}"));
                 }
             }
         }
