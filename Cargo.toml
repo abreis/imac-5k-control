@@ -1,7 +1,7 @@
 [package]
 edition = "2024"
 name = "imac-5k-control"
-version = "0.6.1"
+version = "0.6.2"
 authors = ["Andre Braga Reis <andre@saltwing.com>"]
 publish = false
 
@@ -81,7 +81,7 @@ embassy-infinite-futures = { git = "https://code.saltwing.com/abreis/embassy-inf
 thiserror = { version = "2.0.18", default-features = false }
 ratatui-core = { version = "0.1.0", default-features = false }
 ratatui-widgets = { version = "0.3.0", default-features = false }
-ratatui-serial = { git = "https://code.saltwing.com/abreis/ratatui-serial.git", tag = "v0.4.1" }
+ratatui-serial = { git = "https://code.saltwing.com/abreis/ratatui-serial.git", tag = "0.4.3" }
 
 # Direct the esp-onewire dependency on esp-ds18b20 to our local gitlab
 # [patch."https://github.com/abreis/esp-onewire"]

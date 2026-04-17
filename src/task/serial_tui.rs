@@ -6,8 +6,8 @@ use super::{
     power_relay::{PowerRelayDynSender, PowerRelayStateDynReceiver, RelayCommand, RelayStatus},
     temp_sensor::{TempSensorDynReceiver, TemperatureReading},
 };
-use crate::memlog::{Record, SharedLogger};
-use alloc::{boxed::Box, format, vec::Vec};
+use crate::memlog::SharedLogger;
+use alloc::{boxed::Box, format};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel, signal};
 use embassy_time::{Duration, Timer};
 use esp_hal::{gpio, uart};
@@ -20,7 +20,6 @@ const SESSION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const PANEL_HEIGHT: u16 = 11;
 const BUTTON_PANEL_WIDTH: u16 = 24;
 const MAX_FAN_INPUT_LEN: usize = 3;
-const TEMP_HISTORY_LEN: usize = 24;
 const LOG_LINE_COUNT: usize = 11;
 const EVENT_CHANNEL_CAPACITY: usize = 8;
 
@@ -59,7 +58,7 @@ pub enum Event {
     Relay(RelayStatus),
     Temperature(TemperatureReading),
     DisplayBoard(DisplayState),
-    LogsSnapshot(Vec<Record>),
+    LogsChanged,
     TimedOut,
 }
 type EventChannel = channel::Channel<NoopRawMutex, Event, EVENT_CHANNEL_CAPACITY>;
@@ -70,17 +69,6 @@ pub enum SessionCommand {
     Stop,
 }
 type SessionControlSignal = signal::Signal<NoopRawMutex, SessionCommand>;
-
-fn collect_logs(memlog: SharedLogger, limit: usize) -> Vec<Record> {
-    let records = memlog.records();
-    let mut logs = Vec::with_capacity(limit.min(records.len()));
-
-    for record in records.iter().take(limit).rev() {
-        logs.push(record.clone());
-    }
-
-    logs
-}
 
 #[embassy_executor::task]
 pub async fn tui_event_stream(
@@ -130,8 +118,6 @@ pub async fn tui_event_stream(
         if let Some(value) = displayboard_receiver.try_get() {
             event_channel.send(Event::DisplayBoard(value)).await;
         }
-        let value = collect_logs(memlog, LOG_LINE_COUNT);
-        event_channel.send(Event::LogsSnapshot(value)).await;
 
         //
         // Start listening for updates.
@@ -169,10 +155,7 @@ pub async fn tui_event_stream(
                 Either10::Future5(relay_state) => Event::Relay(relay_state),
                 Either10::Future6(temperature) => Event::Temperature(temperature),
                 Either10::Future7(display_state) => Event::DisplayBoard(display_state),
-                Either10::Future8(_record) => {
-                    let logs = collect_logs(memlog, LOG_LINE_COUNT);
-                    Event::LogsSnapshot(logs)
-                }
+                Either10::Future8(_record) => Event::LogsChanged,
 
                 Either10::Future9(_timeout) => {
                     // This event must arrive.
@@ -261,6 +244,7 @@ pub async fn run(
             &pincontrol_publisher,
             fanduty_sender.clone(),
             powerrelay_sender,
+            memlog,
         );
         let panel_events = event_channel.receiver();
         {
@@ -297,10 +281,7 @@ pub async fn run(
 
 mod app {
     use super::*;
-    use alloc::{
-        collections::vec_deque::VecDeque,
-        string::{String, ToString},
-    };
+    use alloc::string::{String, ToString};
     use ratatui_core::{
         layout::{Constraint, Direction, Layout, Rect},
         terminal::Frame,
@@ -310,7 +291,6 @@ mod app {
     use ratatui_widgets::{
         block::Block,
         paragraph::{Paragraph, Wrap},
-        sparkline::Sparkline,
     };
 
     //
@@ -349,17 +329,15 @@ mod app {
         fan_duty: Option<u8>,
         fan_tachy: Option<u16>,
         fan_input: String,
-        fan_input_dirty: bool,
         net_status: Option<NetworkStatus>,
         relay_state: Option<RelayStatus>,
         temperature: Option<TemperatureReading>,
         display_state: Option<DisplayState>,
-        temp_history: VecDeque<u64>,
-        logs: Vec<Record>,
         status: String,
         pincontrol_publisher: &'a PinControlPublisher,
         fanduty_sender: FanDutyDynSender,
         powerrelay_sender: PowerRelayDynSender,
+        memlog: SharedLogger,
     }
 
     #[derive(Clone, Copy, PartialEq, Eq)]
@@ -367,7 +345,6 @@ mod app {
         Buttons,
         RelayToggle,
         FanInput,
-        FanSend,
     }
 
     impl Focus {
@@ -375,8 +352,15 @@ mod app {
             match self {
                 Self::Buttons => Self::RelayToggle,
                 Self::RelayToggle => Self::FanInput,
-                Self::FanInput => Self::FanSend,
-                Self::FanSend => Self::Buttons,
+                Self::FanInput => Self::Buttons,
+            }
+        }
+
+        fn previous(self) -> Self {
+            match self {
+                Self::Buttons => Self::FanInput,
+                Self::RelayToggle => Self::Buttons,
+                Self::FanInput => Self::RelayToggle,
             }
         }
     }
@@ -386,6 +370,7 @@ mod app {
             pincontrol_publisher: &'a PinControlPublisher,
             fanduty_sender: FanDutyDynSender,
             powerrelay_sender: PowerRelayDynSender,
+            memlog: SharedLogger,
         ) -> Self {
             Self {
                 focus: Focus::Buttons,
@@ -394,38 +379,20 @@ mod app {
                 fan_duty: None,
                 fan_tachy: None,
                 fan_input: String::new(),
-                fan_input_dirty: false,
                 net_status: None,
                 relay_state: None,
                 temperature: None,
                 display_state: None,
-                temp_history: VecDeque::with_capacity(TEMP_HISTORY_LEN),
-                logs: Vec::new(),
                 status: String::new(),
                 pincontrol_publisher,
                 fanduty_sender,
                 powerrelay_sender,
-            }
-        }
-
-        fn push_temperature_sample(&mut self, reading: TemperatureReading) {
-            self.temperature = Some(reading);
-
-            if let Ok(temp_c) = reading.temperature {
-                if self.temp_history.len() == TEMP_HISTORY_LEN {
-                    let _ = self.temp_history.pop_front();
-                }
-                self.temp_history
-                    .push_back((temp_c.clamp(0.0, 100.0) + 0.5) as u64);
+                memlog,
             }
         }
 
         fn set_live_fan_duty(&mut self, fan_duty: Option<u8>) {
             self.fan_duty = fan_duty;
-
-            if !self.fan_input_dirty {
-                self.fan_input = fan_duty.map(|value| value.to_string()).unwrap_or_default();
-            }
         }
 
         fn move_button_selection(&mut self, dx: i8, dy: i8) {
@@ -461,7 +428,6 @@ mod app {
                 Some(value) => {
                     self.fanduty_sender.send(value);
                     self.fan_input = value.to_string();
-                    self.fan_input_dirty = false;
                     self.fan_duty = Some(value);
                     self.status = format!("fan {}%", value);
                 }
@@ -502,9 +468,9 @@ mod app {
                 Event::FanTachy(fan_tachy) => self.fan_tachy = Some(fan_tachy),
                 Event::Net(net_status) => self.net_status = Some(net_status),
                 Event::Relay(relay_state) => self.relay_state = Some(relay_state),
-                Event::Temperature(temperature) => self.push_temperature_sample(temperature),
+                Event::Temperature(temperature) => self.temperature = Some(temperature),
                 Event::DisplayBoard(display_state) => self.display_state = Some(display_state),
-                Event::LogsSnapshot(logs) => self.logs = logs,
+                Event::LogsChanged => (), // just triggers a redraw
                 Event::TimedOut => return Action::Exit,
             }
 
@@ -517,6 +483,10 @@ mod app {
 
                 InputEvent::Tab => {
                     self.focus = self.focus.next();
+                    Action::RedrawChanged
+                }
+                InputEvent::BackTab => {
+                    self.focus = self.focus.previous();
                     Action::RedrawChanged
                 }
 
@@ -549,7 +519,6 @@ mod app {
 
                 InputEvent::Backspace if self.focus == Focus::FanInput => {
                     let _ = self.fan_input.pop();
-                    self.fan_input_dirty = true;
                     Action::RedrawChanged
                 }
 
@@ -558,14 +527,13 @@ mod app {
                 {
                     if self.fan_input.len() < MAX_FAN_INPUT_LEN {
                         self.fan_input.push(byte as char);
-                        self.fan_input_dirty = true;
                         Action::RedrawChanged
                     } else {
                         Action::RedrawNone
                     }
                 }
 
-                InputEvent::Enter | InputEvent::Char(b' ') if self.focus == Focus::FanSend => {
+                InputEvent::Enter if self.focus == Focus::FanInput => {
                     self.send_fan_input();
                     Action::RedrawChanged
                 }
@@ -644,7 +612,6 @@ mod app {
                     Constraint::Length(1),
                     Constraint::Length(1),
                     Constraint::Length(1),
-                    Constraint::Length(1),
                     Constraint::Min(0),
                 ])
                 .split(inner);
@@ -653,25 +620,18 @@ mod app {
             frame.render_widget(Paragraph::new(self.network_text()), rows[1]);
             frame.render_widget(Paragraph::new(self.relay_text()), rows[2]);
             frame.render_widget(Paragraph::new(self.temperature_text()), rows[3]);
-
-            if self.temp_history.is_empty() {
-                frame.render_widget(Paragraph::new(""), rows[4]);
-            } else {
-                let spark_data = self.temp_history.iter().copied().collect::<Vec<_>>();
-                frame.render_widget(Sparkline::default().data(spark_data).max(100), rows[4]);
-            }
-
-            frame.render_widget(Paragraph::new(self.fan_live_text()), rows[5]);
-            frame.render_widget(Paragraph::new(self.fan_editor_text()), rows[6]);
-            frame.render_widget(Paragraph::new(self.display_state_text()), rows[7]);
-            frame.render_widget(Paragraph::new(self.status.as_str()), rows[8]);
+            frame.render_widget(Paragraph::new(self.fan_live_text()), rows[4]);
+            frame.render_widget(Paragraph::new(self.fan_editor_text()), rows[5]);
+            frame.render_widget(Paragraph::new(self.display_state_text()), rows[6]);
+            frame.render_widget(Paragraph::new(self.status.as_str()), rows[7]);
         }
 
         fn render_logs(&self, frame: &mut Frame<'_>, area: Rect) {
             let block = Block::bordered();
             let mut text = String::new();
+            let records = self.memlog.records();
 
-            for (index, record) in self.logs.iter().enumerate() {
+            for (index, record) in records.iter().take(LOG_LINE_COUNT).rev().enumerate() {
                 if index > 0 {
                     text.push('\n');
                 }
@@ -688,8 +648,8 @@ mod app {
             match self.led_state {
                 Some(led_state) => format!(
                     "led g{} r{}",
-                    bool_mark(led_state.green),
-                    bool_mark(led_state.red)
+                    if led_state.green { '+' } else { '-' },
+                    if led_state.red { '+' } else { '-' }
                 ),
                 None => String::from("led g? r?"),
             }
@@ -772,13 +732,8 @@ mod app {
             } else {
                 format!("[{input}]")
             };
-            let send = if self.focus == Focus::FanSend {
-                "<send>"
-            } else {
-                "[send]"
-            };
 
-            format!("set {input} {send}")
+            format!("set {input}")
         }
 
         fn display_state_text(&self) -> String {
@@ -816,10 +771,6 @@ mod app {
     fn parse_fan_input(input: &str) -> Option<u8> {
         let value = input.parse::<u8>().ok()?;
         (value <= 100).then_some(value)
-    }
-
-    fn bool_mark(value: bool) -> char {
-        if value { '+' } else { '-' }
     }
 
     fn format_button_label(label: &str, selected: bool, focused: bool) -> String {
