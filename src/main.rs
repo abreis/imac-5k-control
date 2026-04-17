@@ -9,6 +9,8 @@ extern crate alloc;
 mod config;
 mod driver;
 mod ioexpander;
+mod kvconfig;
+mod kvstore;
 mod memlog;
 mod task;
 
@@ -167,7 +169,7 @@ async fn main(spawner: Spawner) {
     // Spawn tasks.
     || -> Result<(), SpawnError> {
         // Run the buzzer controller.
-        spawner.spawn(task::buzzer_control(pin_buzzer, buzzer_channel))?;
+        spawner.spawn(task::buzzer_control(pin_buzzer, buzzer_channel)?);
 
         // Control the display-board buttons behind the MCP23009 and watch the board LEDs.
         spawner.spawn(task::pin_control(
@@ -176,26 +178,26 @@ async fn main(spawner: Spawner) {
             displayled_watch.dyn_sender(),
             buzzer_channel,
             memlog,
-        ))?;
+        )?);
 
         // Keep the wifi connected.
         spawner.spawn(task::wifi::wifi_permanent_connection(
             wifi_controller,
             memlog,
-        ))?;
+        )?);
 
         // Run the network stack.
-        spawner.spawn(task::net::stack_runner(net_runner))?;
+        spawner.spawn(task::net::stack_runner(net_runner)?);
 
         // Monitor the network stack for changes.
-        spawner.spawn(task::net_monitor(net_stack, netstatus_watch.dyn_sender()))?;
+        spawner.spawn(task::net_monitor(net_stack, netstatus_watch.dyn_sender())?);
 
         // Operate the display-controller power relay.
         spawner.spawn(task::power_relay(
             pin_power_display_relay,
             powerrelay_channel.dyn_receiver(),
             powerrelay_watch.dyn_sender(),
-        ))?;
+        )?);
 
         // Recognize display-board state from LEDs and relay.
         spawner.spawn(task::display_board(
@@ -203,7 +205,7 @@ async fn main(spawner: Spawner) {
             powerrelay_watch.dyn_receiver().unwrap(),
             displayboard_watch.dyn_sender(),
             memlog,
-        ))?;
+        )?);
 
         // Handle power-on and power-off sequences on command.
         spawner.spawn(task::display_control(
@@ -213,7 +215,7 @@ async fn main(spawner: Spawner) {
             powerrelay_channel.dyn_sender(),
             buzzer_channel,
             memlog,
-        ))?;
+        )?);
 
         // Watch the case button for presses.
         spawner.spawn(task::case_button(
@@ -221,28 +223,28 @@ async fn main(spawner: Spawner) {
             casebutton_watch.dyn_sender(),
             buzzer_channel,
             memlog,
-        ))?;
+        )?);
 
         // Control the case fan duty cycle.
         spawner.spawn(task::fan_duty(
             pwm_channel,
             fanduty_watch.dyn_receiver().unwrap(),
-        ))?;
+        )?);
 
         // Read the fan tachometer periodically.
-        spawner.spawn(task::fan_tachy(pin_fan_tachy, fantachy_watch.dyn_sender()))?;
+        spawner.spawn(task::fan_tachy(pin_fan_tachy, fantachy_watch.dyn_sender())?);
 
         // Take a temperature measurement periodically.
         spawner.spawn(task::temp_sensor(
             pin_sensor_display_temp.into(),
             tempsensor_watch.dyn_sender(),
-        ))?;
+        )?);
 
         // Keep adjusting the fan duty based on the temperature measurements.
         spawner.spawn(task::fan_temp_control(
             fanduty_watch.dyn_sender(),
             tempsensor_watch.dyn_receiver().unwrap(),
-        ))?;
+        )?);
 
         // Hardware safety watchdog.
         spawner.spawn(task::watchdog(
@@ -252,7 +254,7 @@ async fn main(spawner: Spawner) {
             powerrelay_channel.dyn_sender(),
             buzzer_channel,
             memlog,
-        ))?;
+        )?);
 
         // Spawn the MQTT control task.
         spawner.spawn(task::mqtt::run(
@@ -265,7 +267,7 @@ async fn main(spawner: Spawner) {
             tempsensor_watch.dyn_receiver().unwrap(),
             displayboard_watch.dyn_receiver().unwrap(),
             memlog,
-        ))?;
+        )?);
 
         // Launch the UART interface event stream.
         spawner.spawn(task::serial_tui::tui_event_stream(
@@ -279,7 +281,7 @@ async fn main(spawner: Spawner) {
             memlog,
             control_signal,
             event_channel,
-        ))?;
+        )?);
 
         // Launch the UART control interface.
         spawner.spawn(task::serial_tui::run(
@@ -292,7 +294,7 @@ async fn main(spawner: Spawner) {
             memlog,
             control_signal,
             event_channel,
-        ))?;
+        )?);
 
         Ok(())
     }()

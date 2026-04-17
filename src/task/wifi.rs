@@ -23,7 +23,7 @@ pub async fn init(
     Timer::after(Duration::from_millis(250)).await;
 
     let wifi_config =
-        ControllerConfig::default().with_country_code(wifi::CountryInfo::from(*b"NZ"));
+        ControllerConfig::default().with_country_info(wifi::CountryInfo::from(*b"NZ"));
     let (mut wifi_controller, wifi_interfaces) = esp_radio::wifi::new(wifi, wifi_config).unwrap();
 
     // Set the wifi client configuration.
@@ -46,17 +46,13 @@ pub async fn wifi_permanent_connection(
     loop {
         // If we're still connected, wait until we disconnect.
         if controller.is_connected() {
-            let _ = controller.wait_for_disconnect_async().await;
+            if let Ok(info) = controller.wait_for_disconnect_async().await {
+                memlog.info(format!("wifi: disconnected: {:?}", info.reason));
+            }
         }
 
         // Pause before attempting to reconnect.
         Timer::after(WIFI_RECONNECT_PAUSE).await;
-
-        // Start the WiFi controller if necessary.
-        if !controller.is_started() {
-            memlog.info("wifi: starting controller");
-            controller.start_async().await.unwrap();
-        }
 
         match controller.connect_async().await {
             Ok(_info) => memlog.info("wifi: connected"),
